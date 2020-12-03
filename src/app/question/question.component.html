@@ -1,0 +1,28 @@
+<p>question works!</p>
+<div>
+    <!-- <form  [formGroup]="questionForm" (ngSubmit)="submit()" > -->
+      <div style="border:2px solid blue;"  *ngFor="let question of questions; let qInd = index;">
+        <!-- *ngFor="var item of W ; let qInd as index;" -->
+              <label>question</label>
+              <Br>
+              <input type="text" name="question"  [(ngModel)]="questions[qInd].question">
+              <br>
+            
+             <section *ngFor="let list of question.answers; let i = index;">
+             <label>Select Answer</label>
+             <br>
+            <div>
+              <input type="text" name="answer_1"  [(ngModel)]="questions[qInd].answers[i].answer"
+              name="list_{{list.id}}"/> <button (click)="delete(i,qInd)">DELETE</button>
+              <br>
+              <br>
+             </div>
+           </section>
+           <button (click)="add(qInd)">ADD</button>
+          
+      </div>
+      
+      <button (click)="addQuestion()">Add Question</button>
+      <button (click)="submit()" >Submit</button> 
+    <!-- </form> -->
+    </div>

@@ -1,0 +1,97 @@
+
+<div>
+    <form [formGroup]="signupForm" class="form-content" (ngSubmit)="submitForm()">
+        <div class="form-group">
+            <label class="center-block">firstName:
+              <input class="form-control" formControlName="firstName" placeholder="John">
+            </label>
+            <div *ngIf="signupForm.controls['firstName'].invalid && (signupForm.controls['firstName'].dirty || signupForm.controls['firstName'].touched)" class="text-danger">
+                <small *ngIf="signupForm.controls['firstName'].errors.required">
+                  firstName is required.
+                </small>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="center-block">lastName:
+              <input class="form-control" formControlName="lastName" placeholder="Doe">
+            </label>
+            <div *ngIf="signupForm.controls['lastName'].invalid && (signupForm.controls['lastName'].dirty || signupForm.controls['lastName'].touched)" class="text-danger">
+                <small *ngIf="signupForm.controls['lastName'].errors.required">
+                  lastName is required.
+                </small>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="center-block">Mobile:
+              <input class="form-control" formControlName="mobile" placeholder="8954632140" minlength="10">
+            </label>
+            <div *ngIf="signupForm.controls['mobile'].invalid && (signupForm.controls['mobile'].dirty || signupForm.controls['mobile'].touched)" class="text-danger">
+                <small *ngIf="signupForm.controls['mobile'].errors.required">
+                  Number is required.
+                </small>
+                <small *ngIf="signupForm.controls['mobile'].errors.minlength">Mobile Number must be at least 10 characters long.</small>
+               </div>
+        </div>
+        <div class="form-group ">
+            <label for="inputState" >Course
+                <select class="form-control" formControlName="course">
+                    <option>CSE</option>
+                    <option>Mechanical</option>
+                    <option>Civil</option>
+                  </select>
+            </label>
+            <div *ngIf="signupForm.controls['course'].invalid && (signupForm.controls['course'].dirty || signupForm.controls['course'].touched)" class="text-danger">
+                <small *ngIf="signupForm.controls['course'].errors.required">
+                  course is required.
+                </small>
+               </div>
+         </div>
+         <div class="form-group">
+             <label>Gender: </label>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="1" value="option1" formControlName="gender">
+                <label class="form-check-label" for="inlineCheckbox1">Male</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="2" value="option2" formControlName="gender">
+                <label class="form-check-label" for="inlineCheckbox2">female</label>
+              </div>
+              <div *ngIf="signupForm.controls['gender'].invalid && (signupForm.controls['gender'].dirty || signupForm.controls['gender'].touched)" class="text-danger">
+                <small *ngIf="signupForm.controls['gender'].errors.required">
+                  gender is required.
+                </small>
+              </div>
+         </div>
+        
+          <div class="form-group">
+            <label class="center-block">Email:
+             <input class="form-control" [class.is-invalid] ="Email.invalid && Email.touched" formControlName="email" placeholder="@abc.com">
+            </label>
+
+         <div *ngIf="(Email.invalid && Email.touched) || Email.dirty">
+            <small *ngIf="Email.errors?.required" class="text-danger">email is required</small>
+            <small *ngIf="Email.errors?.pattern" class="text-danger">Please provide a valid email address</small>
+           </div>
+        </div>
+     <div class="form-group">
+         <label>D.O.B
+            <input [matDatepicker]="basicDatepicker" [min]="minDate" [max]="maxDate" formControlName="dob">
+            <mat-datepicker-toggle [for]="basicDatepicker"></mat-datepicker-toggle>
+            <mat-datepicker #basicDatepicker></mat-datepicker>
+         </label>
+     </div>
+     <div>
+         <label> Age :
+             <input type="number" class="form-control" formControlName="age"  min="18">
+         </label>
+         <div *ngIf="signupForm.controls['age'].invalid && (signupForm.controls['age'].dirty || signupForm.controls['age'].touched)" class="text-danger">
+            <small *ngIf="signupForm.controls['age'].errors.required">
+              Age is required.
+            </small>
+            <small *ngIf="signupForm.controls['age'].errors.min">Age must be 18 years Old.</small>
+           </div>
+     </div>
+     <button  class="btn btn-lg btn-success pull-xs-right" type="submit">Register</button>
+     </form>
+  
+</div>
