@@ -11,6 +11,9 @@ import { MatNativeDateModule} from '@angular/material/core';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { LoginComponent } from './login/login.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
+import { CalculatorComponent } from './calculator/calculator.component';
+import { PercentageComponent } from './percentage/percentage.component';
+import { AverageComponent } from './average/average.component';
 
 @NgModule({
   declarations: [
@@ -18,7 +21,10 @@ import { DashboardComponent } from './dashboard/dashboard.component';
     FormComponent,
     QuestionComponent,
     LoginComponent,
-    DashboardComponent
+    DashboardComponent,
+    CalculatorComponent,
+    PercentageComponent,
+    AverageComponent
   ],
   imports: [
     BrowserModule,

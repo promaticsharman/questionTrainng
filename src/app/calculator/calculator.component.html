@@ -1,0 +1,29 @@
+<div  class="form-group">
+   <form [formGroup]="marksForm" >
+    <div>
+        <label class="center-block">
+            Enter Marks :
+        </label>
+        <input type="text"  (keypress)="numberOnly($event)" placeholder="English" formControlName="English" class="form-control">
+        <div *ngIf="marksForm.controls['English'].invalid && (marksForm.controls['English'].dirty || marksForm.controls['English'].touched)" class="text-danger">
+            <small *ngIf="marksForm.controls['English'].errors.required">
+              Marks is required.
+            </small>
+        </div>
+        <input type="text"  (keypress)="numberOnly($event)" placeholder="Maths"  formControlName="Math" class="form-control">
+       
+        <input type="text"  (keypress)="numberOnly($event)" placeholder="Science"  formControlName="Science" class="form-control">
+       
+        <input type="text"  (keypress)="numberOnly($event)" placeholder="physical"  formControlName="Physical" class="form-control">
+       
+    </div>
+        <div>
+            
+                    <button (click)="Percentage()"  formControlName="percentage">Percentage</button><p>{{percenttotal}}</p>         
+                    <button (click)="Average()"  formControlName="average">Average</button><p>{{averageTotal}}</p>
+                   
+              
+        </div>
+    </form>
+    <button type="submit" routerLink="/percentage/{{percenttotal}}/{{english}}">Submit</button>
+</div>

@@ -1,26 +1,39 @@
 <p>question works!</p>
-<div>
-    <!-- <form  [formGroup]="questionForm" (ngSubmit)="submit()" > -->
+<div [formGroup]="questionForm" (ngSubmit)="submit()">
+    <!-- <form   > -->
       <div style="border:2px solid blue;"  *ngFor="let question of questions; let qInd = index;">
         <!-- *ngFor="var item of W ; let qInd as index;" -->
-              <label>question</label>
-              <Br>
-              <input type="text" name="question"  [(ngModel)]="questions[qInd].question">
-              <br>
+             
+                  <label>question</label>
+                  <Br>
+                  <input type="text" name="question" formControlName="question_1" required  [(ngModel)]="questions[qInd].question">
+                  <br>
+               <div *ngIf="questionForm.controls['question_1'].invalid && (questionForm.controls['question_1'].dirty || questionForm.controls['question_1'].touched)" class="text-danger">
+                    <small *ngIf="questionForm.controls['question_1'].errors.required">
+                     question is required.
+                    </small>
+              </div>
+    
+            
             
              <section *ngFor="let list of question.answers; let i = index;">
              <label>Select Answer</label>
              <br>
-            <div>
-              <input type="text" name="answer_1"  [(ngModel)]="questions[qInd].answers[i].answer"
-              name="list_{{list.id}}"/> <button (click)="delete(i,qInd)">DELETE</button>
+             <div>
+               <input type="text" name="answer_1" formControlName="answer_1" required [(ngModel)]="questions[qInd].answers[i].answer"
+               name="list_{{list.id}}"/> <button (click)="delete(i,qInd)">DELETE</button>
               <br>
               <br>
              </div>
+             <div *ngIf="questionForm.controls['answer_1'].invalid && (questionForm.controls['answer_1'].dirty || questionForm.controls['answer_1'].touched)" class="text-danger">
+              <small *ngIf="questionForm.controls['answer_1'].errors.required">
+               answer is required.
+              </small>
+          </div>
            </section>
            <button (click)="add(qInd)">ADD</button>
           
-      </div>
+       </div>
       
       <button (click)="addQuestion()">Add Question</button>
       <button (click)="submit()" >Submit</button> 

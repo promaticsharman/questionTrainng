@@ -8,15 +8,15 @@ import { FormGroup,  FormBuilder, } from '@angular/forms';
 export class QuestionComponent implements OnInit {
   questionForm: FormGroup;
   constructor(private fb: FormBuilder) { 
-    // this.createForm();
+    this.createForm();
   }
 
-  // createForm() {
-  //   this.questionForm = this.fb.group({
-  //      question: [ ],
-  //      answer: [ ]
-  //     })
-  //   }
+  createForm() {
+    this.questionForm = this.fb.group({
+       question_1: [ ],
+       answer_1: [ ]
+      })
+    }
   // values: any[]= [];
   // public lists: any[] = [{
   //   answer_1:'', 
