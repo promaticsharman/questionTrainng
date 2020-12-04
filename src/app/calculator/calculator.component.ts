@@ -15,6 +15,9 @@ export class CalculatorComponent implements OnInit {
   averageTotal:any
   percenttotal
   english
+  math
+  science
+  physical
   constructor(
     private router: Router,
     private fb: FormBuilder,
@@ -25,8 +28,8 @@ export class CalculatorComponent implements OnInit {
        Math: ['', [Validators.required]],
        Science: ['', [Validators.required]],
        Physical: ['', [Validators.required]],
-       percentage:[''],
-       average:[''],
+      //  percentage:[''],
+      //  average:[''],
     })
   }
   // get English() { return this.marksForm.get('English'); }
@@ -50,6 +53,9 @@ export class CalculatorComponent implements OnInit {
     //   Physical : this. Physical.value,
     // };
     this.english = this.marksForm.value.English
+    this.math = this.marksForm.value.Math
+    this.science = this.marksForm.value.Science
+    this.physical = this.marksForm.value.Physical
     this.percenttotal=(parseInt(this.marksForm.value.English)+parseInt(this.marksForm.value.Math)+
     parseInt(this.marksForm.value.Science)+parseInt(this.marksForm.value.Physical))/400*100;
     // this.router.navigate(['/percentage']);

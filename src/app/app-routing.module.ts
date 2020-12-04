@@ -12,7 +12,7 @@ import { AuthguardService } from './authguard.service';
 const routes: Routes = [
 {path:'',redirectTo:"/login",pathMatch:'full'},
 { path: 'signup', component: FormComponent},
-{ path: 'percentage/:percent/:english', component: PercentageComponent},
+{ path: 'percentage/:percent/:english/:math/:science/:physical', component: PercentageComponent},
 { path: 'average/:percent', component: AverageComponent},
 { path: 'question', component: QuestionComponent},
 { path: 'login', component: LoginComponent},
