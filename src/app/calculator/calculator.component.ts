@@ -9,8 +9,7 @@ import { Button } from 'protractor';
   templateUrl: './calculator.component.html',
   styleUrls: ['./calculator.component.css']
 })
-export class CalculatorComponent implements OnInit {
-  
+export class CalculatorComponent implements OnInit {  
   marksForm: FormGroup;
   averageTotal:any
   percenttotal
@@ -18,6 +17,7 @@ export class CalculatorComponent implements OnInit {
   math
   science
   physical
+
   constructor(
     private router: Router,
     private fb: FormBuilder,
@@ -28,6 +28,7 @@ export class CalculatorComponent implements OnInit {
        Math: ['', [Validators.required]],
        Science: ['', [Validators.required]],
        Physical: ['', [Validators.required]],
+       selectedValue: 'default'
       //  percentage:[''],
       //  average:[''],
     })
@@ -45,6 +46,14 @@ export class CalculatorComponent implements OnInit {
     return true;
 
   }
+  onChange (event) {
+    console.log(event.target.value)
+    if(event.target.value === 'percentage') {
+      this.Percentage()
+    } else if(event.target.value === 'average') {
+      this.Average()
+    }
+  }
   Percentage(){
     // const values = {
     //   English : this.English.value,
@@ -59,21 +68,41 @@ export class CalculatorComponent implements OnInit {
     this.percenttotal=(parseInt(this.marksForm.value.English)+parseInt(this.marksForm.value.Math)+
     parseInt(this.marksForm.value.Science)+parseInt(this.marksForm.value.Physical))/400*100;
     // this.router.navigate(['/percentage']);
+    this.percenttotal = Math.round(this.percenttotal)
     console.log(this.percenttotal);
   }
   Average(){
+    this.english = this.marksForm.value.English
+    this.math = this.marksForm.value.Math
+    this.science = this.marksForm.value.Science
+    this.physical = this.marksForm.value.Physical
     this.averageTotal=(parseInt(this.marksForm.value.English)+parseInt(this.marksForm.value.Math)+
     parseInt(this.marksForm.value.Science)+parseInt(this.marksForm.value.Physical))/4;
     console.log(this.averageTotal);
   }
   submit(){
-  // if(this.marksForm.value.percentage){
-  //   this.router.navigate(['/percentage'])
-  // }else if(this.marksForm.value.average){
-  //   this.router.navigate(['average'])
-  // }else{
-  //   this.router.navigate(['calculator'])
-  // }
+    console.log(this.marksForm.value)
+    let markDetails = {
+      math: this.marksForm.value.Math,
+      science: this.marksForm.value.Science,
+      physical: this.marksForm.value.Physical,
+      english: this.marksForm.value.English,
+      percent: 0,
+      average: 0
+    }
+    if(this.percenttotal > 0) {
+      markDetails.percent = this.percenttotal
+    }
+    if(this.averageTotal > 0) {
+      markDetails.average = this.averageTotal
+    } 
+    if(this.marksForm.value.selectedValue === 'percentage'){
+      this.router.navigate(['/percentage', markDetails])
+    }else if(this.marksForm.value.selectedValue === 'average'){
+      this.router.navigate(['average'])
+    }else{
+      this.router.navigate(['calculator'])
+    }
  
   }
 

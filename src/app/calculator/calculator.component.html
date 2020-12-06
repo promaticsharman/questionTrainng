@@ -17,13 +17,17 @@
         <input type="text"  (keypress)="numberOnly($event)" placeholder="physical"  formControlName="Physical" class="form-control">
        
     </div>
-        <div>
-            
-                    <button (click)="Percentage()"  formControlName="percentage">Percentage</button><p>{{percenttotal}}</p>         
-                    <button (click)="Average()"  formControlName="average">Average</button><p>{{averageTotal}}</p>
-                   
-              
-        </div>
+    <div>
+        <select formControlName="selectedValue" (change)="onChange($event)">
+            <option value="default">--select--</option>
+            <option value="percentage">Percentage</option>
+            <option value="average">Average</option>
+        </select> <br/>
+       <p *ngIf="percenttotal">Percentage is: {{percenttotal}}</p>
+       <p *ngIf="averageTotal"> Average is: {{averageTotal}}</p>
+    </div>  
+  <button type="submit" (click)="submit()">Submit</button>
     </form>
-    <button type="submit" routerLink="/percentage/{{percenttotal}}/{{english}}/{{math}}/{{science}}/{{physical}}">Submit</button>
+    
+    <!-- <button type="submit" routerLink="/percentage/{{percenttotal}}/{{english}}/{{math}}/{{science}}/{{physical}}/{{averageTotal}}/">Submit</button> -->
 </div>

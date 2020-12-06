@@ -9,13 +9,15 @@ import { ActivatedRoute } from '@angular/router';
 export class PercentageComponent implements OnInit {
 
   constructor(private route: ActivatedRoute) { }
-  percentage
+  average 
+  percent
   english
   math
   science
   physical
   ngOnInit(): void {
-    this.percentage = this.route.snapshot.params.percent
+    this.percent = this.route.snapshot.params.percent
+    this.average= this.route.snapshot.params.average
     this.english = this.route.snapshot.params.english
     this.math = this.route.snapshot.params.math
     this.science = this.route.snapshot.params.science

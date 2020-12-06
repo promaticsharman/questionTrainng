@@ -3,4 +3,7 @@
 <h2>Math marks is : {{math}} </h2>
 <h2>Science marks is : {{science}}</h2>
 <h2>Physical marks is : {{physical}} </h2>
-<h2>Percentage is : {{percentage}}</h2>
+<h2>Percentage is : 
+    <span [ngClass]="{'font-green':  percent > 50, 'font-orange': percent>40 && percent<=50,'font-red': percent<=40}">{{percent}}</span>
+ </h2>
+<h2>Average is: {{average}}</h2>
