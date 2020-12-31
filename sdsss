@@ -1,0 +1,100 @@
+import { Component, OnInit  } from '@angular/core';
+import * as CanvasJS from './canvasjs.min';
+import { AdminService } from "../../shared/admin.service";
+import { element } from 'protractor';
+
+@Component({
+  selector: 'app-dashboard',
+  templateUrl: './dashboard.component.html',
+  styleUrls: ['./dashboard.component.css']
+})
+export class DashboardComponent implements OnInit {
+  total=[]
+  constructor(private service: AdminService) {    
+  }
+  
+  ngOnInit() {
+     this.service.revenueGraph().subscribe(res => {
+      console.log("Revdata:", res) 
+      let months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let pointsData = [];
+      res.forEach(element => {
+        var yearData = new Date(element.createdAt);
+        let monthsData = {
+          y: element.total,
+          label: months[element._id.month - 1 ] + ' ' + yearData.getFullYear()   
+        }
+        pointsData.push(monthsData);        
+      });      
+      pointsData.sort(function(a, b) {
+        // return months.indexOf(a.label) - months.indexOf(b.label);
+        a = a.label.split(" ");
+        b = b.label.split(" ");
+        console.log('test', a);
+        console.log('tesss', b);
+        if(a[1] > b[1]) {
+          return -1
+        } else {
+            return months.indexOf(a[0]) - months.indexOf(b[0]);
+        };
+        let res = 0
+        return res;
+      });
+      console.log('pointsss', pointsData);
+      
+      let chart = new CanvasJS.Chart("chartContainer", {
+          animationEnabled: true,
+          theme: "light2",
+          title: {
+            text: "Total Revenue"
+          },
+          axisY:{
+            valueFormatString: "$##0",
+          },
+          data: [{
+            type: "line",
+            indexLabelFontSize: 16,
+            dataPoints: pointsData
+          }]
+        });
+        
+        chart.render();
+      })
+        
+        // console.log('iddd',res._id);
+        // console.log('dddddddd',res.total)
+      }
+    // }
+  
+    // let chart = new CanvasJS.Chart("chartContainer", {
+    //   animationEnabled: true,
+	  //   theme: "light2",
+    //   title: {
+    //     text: "Total Revenue"
+    //   },
+    //   data: [{
+    //     type: "line",
+    //     indexLabelFontSize: 16,
+    //     dataPoints: [
+    //       { y: 71, label: "Jan" },
+    //       { y: 55, label: "Feb" },
+    //       { y: 50, label: "Mar" },
+    //       { y: 65, label: "Apr" },
+    //       { y: 95, label: "May" },
+    //       { y: 68, label: "Jun" },
+    //       { y: 28, label: "Jul" },
+    //       { y: 34, label: "Aug" },
+    //       { y: 14, label: "Sep" },
+    //       { y: 40, label: "Oct" },
+    //       { y: 50, label: "Nov" },
+    //       { y: 60, label: "Dec" }
+    //     ]
+    //   }]
+    // });
+    
+    // chart.render();
+  }
+  // gerRevData(){
+
+  // }
+// }
