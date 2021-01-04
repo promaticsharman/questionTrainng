@@ -1,0 +1,357 @@
+<div class="main-content">
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-12" style="margin-top: 30px;">
+                <form [formGroup]="promoCodeForm">
+                    <div class="card">
+                        <div class="card-header card-header-danger">
+                            <h4 class="card-title">Add Promo Codes</h4>
+                        </div>
+                        <div class="card-body block-card">
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <mat-form-field class="example-full-width">
+                                        <!-- <textarea matInput placeholder="Description" rows="5" formControlName="description" [(ngModel)]="addBook.frame" [ngModelOptions]="{standalone: true}"></textarea> -->
+                                        <input matInput placeholder="Enter Code" formControlName="promo_code" [(ngModel)]="code" [ngModelOptions]="{standalone: true}">
+                                    </mat-form-field>
+                                    <div *ngIf="promoCodeForm.controls['promo_code'].touched &&
+                                            promoCodeForm.controls['promo_code'].invalid"
+                                                  class="text-danger">
+                                            <div *ngIf="promoCodeForm.controls['promo_code'].errors &&
+                                                promoCodeForm.controls['promo_code'].errors.required">
+                                                    Promo Code is required.
+                                            </div>
+                                            <div *ngIf="promoCodeForm.controls['promo_code'].errors &&
+                                            !promoCodeForm.controls['promo_code'].errors.required && promoCodeForm.controls['promo_code'].errors.whitespace">
+                                                 Please add valid data
+                                             </div>
+                                      </div>
+                                </div>
+
+                                <div class="col-md-12">
+                                    <mat-form-field class="example-full-width">
+                                        <!-- <textarea matInput placeholder="Description" rows="5" formControlName="description" [(ngModel)]="addBook.frame" [ngModelOptions]="{standalone: true}"></textarea> -->
+                                        <input matInput appOnlynumber placeholder="Enter Discount Percentage" formControlName="dis_percentage" [(ngModel)]="discount_percentage" [ngModelOptions]="{standalone: true}">
+                                    </mat-form-field>
+                                    <div *ngIf="promoCodeForm.controls['dis_percentage'].touched &&
+                                            promoCodeForm.controls['dis_percentage'].invalid"
+                                                  class="text-danger">
+                                            <div *ngIf="promoCodeForm.controls['dis_percentage'].errors &&
+                                                    promoCodeForm.controls['dis_percentage'].errors.required">
+                                                    Discount Percentage is required.
+                                            </div>
+                                            <div *ngIf="promoCodeForm.controls['dis_percentage'].errors &&
+                                                    (promoCodeForm.controls['dis_percentage'].errors.min || promoCodeForm.controls['dis_percentage'].errors.max)">
+                                                    Discount Percentage should be between 1 to 100
+                                            </div>
+                                      </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <button mat-raised-button type="submit" class="btn btn-danger" [disabled]="!promoCodeForm.valid" (click)="addPromoCode()">Submit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { Component, OnInit, ViewChild } from '@angular/core';
+import { FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
+import { MatDialog, MatDialogRef } from '@angular/material/dialog';
+import { MatPaginator } from '@angular/material/paginator';
+import { MatSort } from '@angular/material/sort';
+import { MatTableDataSource } from '@angular/material/table';
+import { ActivatedRoute } from '@angular/router';
+import { AdminService } from 'shared/admin.service';
+import Swal from 'sweetalert2';
+
+@Component({
+  selector: 'app-promo-codes',
+  templateUrl: './promo-codes.component.html',
+  styleUrls: ['./promo-codes.component.css']
+})
+export class PromoCodesComponent implements OnInit {
+  checked = false;
+	indeterminate = false;
+	labelPosition: 'before' | 'after' = 'after';
+	disabled = false;
+	tableData
+	backUpTableData
+	showLoader
+	reqData
+	getData
+	datamodel
+	length
+	timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+	filterValue
+	responseData = []
+  displayedColumns : string[] = ['position', 'code', 'discount_percentage', 'Action']
+  dataSource:any
+  element_id
+	allReplacement = 54321
+	data = []
+	selectedUsers = []
+	selection
+	filter_by
+	exam_id
+	exam_name
+	@ViewChild(MatSort, { static: true }) sort: MatSort;
+  @ViewChild(MatPaginator, { static: true }) paginator: MatPaginator;
+  constructor(private dialog: MatDialog, private route: ActivatedRoute, private service: AdminService) { }
+
+  ngOnInit(): void {
+    this.reqData = {}
+		this.reqData.offset = 0
+		this.reqData.limit = 10
+		this.dataSource = new MatTableDataSource(this.responseData);
+		this.dataSource.paginator = this.paginator;
+		this.dataSource.sort = this.sort;
+    this.datamodel = {}
+    this.getAllPromoCodes(this.reqData.limit,this.reqData.offset);
+  }
+
+  openAddDialog(){
+		const dialogRef = this.dialog.open(AddPromoCode,{
+			height: '425px',
+			width: '600px'
+		});
+		dialogRef.afterClosed().subscribe(result => {
+			console.log('The dialog was closed');
+			this.reqData = {}
+		    this.reqData.offset = 0
+		    this.reqData.limit = 10
+		    this.dataSource = new MatTableDataSource(this.responseData);
+		    this.dataSource.paginator = this.paginator;
+		    this.dataSource.sort = this.sort;
+		    this.datamodel = {}
+    	  this.getAllPromoCodes(this.reqData.limit, this.reqData.offset)
+			
+		});
+  }
+  
+  openEditDialog(id){
+		const dialogRefEdit = this.dialog.open(EditPromoCode,{
+			height: '425px',
+			width: '600px',
+			id: id
+		});
+		dialogRefEdit.afterClosed().subscribe(result => {
+			console.log('The dialog was closed');	
+			this.reqData = {}
+		    this.reqData.offset = 0
+		    this.reqData.limit = 10
+		    this.dataSource = new MatTableDataSource(this.responseData);
+		    this.dataSource.paginator = this.paginator;
+		    this.dataSource.sort = this.sort;
+		    this.datamodel = {}
+    	  this.getAllPromoCodes(this.reqData.limit, this.reqData.offset)
+		});
+  }
+  
+  ngAfterViewInit() {
+		this.dataSource.paginator = this.paginator
+  }
+  
+  getPageSizeOptions() {
+		return [5,10, 20, 30];
+  }
+
+	paginationOptionChange(evt) {
+		console.log(evt)
+		this.reqData.offset = (evt.pageIndex * evt.pageSize).toString()
+		this.reqData.limit = evt.pageSize
+		console.log(this.reqData)
+		this.service.getAllPromoCodes(this.reqData.limit, this.reqData.offset).subscribe(data => {
+			console.log(data)
+			if (data) {
+				this.responseData = data.data.rows
+				this.length = data.data.count
+				this.dataSource = new MatTableDataSource(data.data);
+				this.dataSource.sort = this.sort;
+				console.log(this.dataSource)
+				if (this.filterValue) {
+					this.dataSource.filter = this.filterValue
+				}
+			}
+		}, err => {
+			console.log(err)
+			if (err.status >= 400) {
+				// this.toastr.error('Internal Error', 'Error')
+			} else {
+				// this.toastr.error('Internet Connection Error', 'Error')
+				console.log('Internet Connection Error')
+			}
+		})
+  }
+
+  getAllPromoCodes(limit, offset){
+    this.service.getAllPromoCodes(limit, offset).subscribe(data => {
+			console.log(data);
+			if(data){
+				this.length = data.data.count;
+				this.dataSource = data.data;
+				console.log(this.dataSource);
+			}
+		},err => {
+			console.log(err);
+        	if(err.status >= 400){
+          		console.log('Invalid Credential!!!');
+        	}else{
+          		console.log('Internet Connection Error');
+        	}
+		})
+  }
+
+  deletePromoCode(id){
+		Swal.fire({
+		  title: 'Are you sure want to remove?',
+		  text: 'You will not be able to recover this Promo Code!',
+		  icon: 'warning',
+		  showCancelButton: true,
+		  confirmButtonText: 'Yes, delete it!',
+		  cancelButtonText: 'No, keep it'
+		}).then((result) => {
+		  if (result.value) {
+			this.service.deletePromoCode(id).subscribe(data => {
+				console.log(data);
+				Swal.fire(
+					'Deleted!',
+					'This Promo Code has been deleted.',
+					'success'
+				)
+				this.ngOnInit();
+      });
+		  } else if (result.dismiss === Swal.DismissReason.cancel) {
+			Swal.fire(
+			  'Cancelled',
+			  'This Promo Code is safe :)',
+			  'error'
+			)
+		  }
+		})
+	  }
+
+
+}
+
+@Component({
+	selector: 'add-promo-codes',
+	templateUrl: 'add-promo-codes.html',
+  })
+  export class AddPromoCode {	
+	code
+	discount_percentage
+	constructor(private fb: FormBuilder,
+	  public dialogRef: MatDialogRef<AddPromoCode>, private service: AdminService, private route: ActivatedRoute) {}
+	
+	  promoCodeForm = new FormGroup({
+      promo_code : new FormControl('', [Validators.required, this.noWhitespaceValidator]),
+      dis_percentage : new FormControl('', [Validators.required, Validators.min(1), Validators.max(100)]) 
+	  })
+	  
+	onNoClick(): void {
+	  this.dialogRef.close();
+	}
+	
+	ngOnInit(): void {
+	}
+
+	noWhitespaceValidator(control: FormControl) {
+		const isWhitespace = (control.value || '').trim().length === 0;
+		const isValid = !isWhitespace;
+		return isValid ? null : { 'whitespace': true };
+	}
+
+	addPromoCode(){
+      console.log("Code : ", this.code);
+      console.log("Discount: ", this.discount_percentage);
+    
+		//alert(this.dialogRef.id);
+		var formData = new FormData();
+		
+		formData.append('promo_code', this.code);
+		formData.append('discount', this.discount_percentage);
+		
+		this.service.addPromoCodes(formData).subscribe(data => {
+		  console.log("Data Successfully Inserted!",data);
+      Swal.fire('Success..!', 'Successfully Created!', 'success')
+      this.dialogRef.close();
+		},err => {
+		  if(err.status >= 400){
+			console.log('Invalid Credential!!!');
+		  }else{
+			console.log('Internet Connection Error');
+		  }
+		})
+	}
+}
+
+
+@Component({
+	selector: 'edit-promo-codes',
+	templateUrl: 'edit-promo-codes.html',
+  })
+  export class EditPromoCode {
+  
+    code
+    discount_percentage
+	constructor(
+	  public dialogRefEdit: MatDialogRef<EditPromoCode>, private service: AdminService, private route: ActivatedRoute) {}
+    
+    promoCodeForm = new FormGroup({
+      promo_code : new FormControl('', [Validators.required]),
+      dis_percentage : new FormControl('', [Validators.required]) 
+    })
+    
+	onNoClick(): void {
+	  this.dialogRefEdit.close();
+	}
+	
+	ngOnInit(): void {
+	  this.service.getPromoCodesById(this.dialogRefEdit.id).subscribe(data =>{
+		console.log("Data : ",data);
+		this.code = data.data.promo_code
+		this.discount_percentage = data.data.discount
+	 })
+	}
+
+	updatePromoCodeById(){
+    var formData = new FormData();
+    
+    formData.append('id', this.dialogRefEdit.id);
+    formData.append('promo_code', this.code);
+		formData.append('discount', this.discount_percentage);
+		
+		this.service.updatePromoCodeById(formData).subscribe(data => {
+		  console.log("Data Successfully Updated!",data);
+      Swal.fire('Success..!', 'Successfully Updated!', 'success')
+      this.dialogRefEdit.close();
+		},err => {
+		  if(err.status >= 400){
+			console.log('Invalid Credential!!!');
+		  }else{
+			console.log('Internet Connection Error');
+		  }
+		})
+	}
+}
