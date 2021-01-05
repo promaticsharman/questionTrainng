@@ -7,3 +7,32 @@ function makeid(length) {
    }
    alert(result);
 }
+
+
+
+
+promo code
+
+
+	getPromoCode(){
+		// console.log("Promo Code : ", this.promoCode)
+		if(this.promoCode) {
+			this.service.getPromoCode(this.promoCode).subscribe(data => {
+				console.log("*******************Promo Code Data: *****************",data.data);
+				if(data.data != null) {
+					this.discount = data.data.discount
+					console.log("Discount : ",this.discount);
+					this.discountAmt = (this.total * this.discount / 100).toFixed(2)
+					this.grandTotal = (this.total - this.discountAmt).toFixed(2)
+					console.log("Grand Total: ",this.grandTotal);
+				}
+				else
+				{
+					this.discount = data.data
+					this.errorMsg = 'This Promo Code does not exists'
+				}
+			})	
+		} else {
+			this.errorMsg = 'Please enter Promo Code'
+		}
+	}
