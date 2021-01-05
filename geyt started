@@ -1,0 +1,138 @@
+<section class="fltr_sec">
+		<div class="container">
+			<div class="col-sm-8 offset-sm-2">
+                <div class="next_seelct text-center">
+                	<h1>Ready to Jump In</h1>
+                	<p>Select your Exam & Get Started</p>
+                	<form class="form-inline justify-content-center">
+	                	<select class="custom-select form-control sel_exm" (change)="onExamChange($event.target.value)">
+	                		<option *ngFor="let exam of examName" value="{{exam._id}}">{{exam.examName}}</option>
+						</select>
+						<!-- <span *ngFor="let exam of examName" > -->
+							<button class="btn btn_theme" (click)="navigate(selectedExamId)">Get Started</button>
+						<!-- </span> -->
+	                	<!-- <button class="btn btn_theme" (click)="navigate(._id)">Get Started</button> -->
+	                </form>
+                </div>
+			</div>
+		</div>
+	</section>
+  
+  
+  
+  
+  
+  import { Component, OnInit } from '@angular/core';
+import { Router,ActivatedRoute } from '@angular/router';
+import { OwlOptions } from 'ngx-owl-carousel-o';
+import { WebServiceService } from 'src/shared/web-service.service';
+import { environment } from "../../environments/environment.prod";
+declare const paral: any;
+
+@Component({
+  selector: 'app-homepage',
+  templateUrl: './homepage.component.html',
+  styleUrls: ['./homepage.component.scss']
+})
+export class HomepageComponent implements OnInit {
+	examName: [];
+	heroOpt: OwlOptions = {
+	    loop: true,
+	    mouseDrag: false,
+	    touchDrag: false,
+	    pullDrag: false,
+	    dots: false,
+	    navSpeed: 700,
+	    navText: ['<i class="fas fa-angle-left"></i>', '<i class="fas fa-angle-right"></i>'],
+	    responsive: {
+	      0: {
+	        items: 1
+	      },
+	      940: {
+	        items: 1
+	      }
+	    },
+	    nav: true
+	}
+
+	customOptions: OwlOptions = {
+	    loop: true,
+	    mouseDrag: false,
+	    touchDrag: false,
+	    pullDrag: false,
+	    dots: false,
+	    navSpeed: 700,
+	    navText: ['<i class="fa fa-angle-left"></i>', '<i class="fa fa-angle-right"></i>'],
+	    responsive: {
+	      0: {
+	        items: 1
+	      },
+	      400: {
+	        items: 2
+	      },
+	      740: {
+	        items: 3
+	      },
+	      940: {
+	        items: 4
+	      }
+	    },
+	    nav: true
+	}
+
+	testOptions: OwlOptions = {
+	    loop: true,
+	    mouseDrag: false,
+	    touchDrag: false,
+	    pullDrag: false,
+	    dots: false,
+	    navSpeed: 700,
+	    navText: ['<i class="fa fa-angle-left"></i>', '<i class="fa fa-angle-right"></i>'],
+	    responsive: {
+	      0: {
+	        items: 1
+	      },
+	      940: {
+	        items: 3
+	      }
+	    },
+	    nav: true,
+	    autoplay:true
+	}
+	selectedExamId = null
+	allTestimonials = []
+	imageUrl
+	  constructor(private service: WebServiceService
+		, private router: Router,
+		private route: ActivatedRoute) { }
+
+	  ngOnInit(): void {
+		this.imageUrl = environment.testimonial_img + 'testimonial/'
+		this.service.getAllExamName().subscribe(data => {
+			console.log(data);
+			this.examName = data.data
+			this.selectedExamId = data.data[0]._id;
+			console.log("Data Array : ", this.examName);
+		  })
+		  this.getAllTestimonials();
+	  }
+
+	  getAllTestimonials(){
+		  this.service.getAllTestimonials().subscribe(data => {
+			  console.log("Testimonials Data: ", data)
+			  this.allTestimonials = data.data
+		  })
+	  }
+	  onExamChange(optionValue) {
+		  console.log('eventValue', optionValue);
+		  this.selectedExamId = optionValue
+	  }
+	  navigate(id){
+		// this.router.navigate(['/exams/',id]) 
+		this.router.navigate(['/exams/',id]);
+		this.router.routeReuseStrategy.shouldReuseRoute = function () {
+		return false;
+		};
+	  }
+
+}
