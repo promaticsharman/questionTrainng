@@ -1,0 +1,76 @@
+exam.component.ts
+
+
+	addToCarts(exam_id) {
+		var user_id, session_id;
+		if (localStorage['userData']) {
+			var user = JSON.parse(localStorage['userData']);
+			user_id = user._id
+		}
+		if (localStorage['session']) {
+			// var user = JSON.parse(localStorage['userData']);
+			session_id = localStorage['session']
+		} else {
+			session_id = this.makeid(10);
+			localStorage['session'] = session_id;
+		}
+
+		var obj = {
+			user_id: user_id,
+			session_id: session_id,
+			exam_id: exam_id,
+		}
+		this.service.getPurchasedExam({user_id: user_id}).subscribe(data => {	
+			let purchasedExams = data.data
+			let alreadyPurchased = false;
+			purchasedExams.forEach(element => {
+				console.log(element, exam_id)
+				let endDate = new Date(element.end_date);
+				let currentDate = new Date();
+				// date.setDate(date.getDate() + element.validity);
+				console.log('***********************************************date*****',endDate, new Date())
+				if(element.exam_id.id === exam_id && endDate >= currentDate) {
+					alreadyPurchased = true;
+				}
+			});
+			console.log('alreadypur', alreadyPurchased);
+			if(!alreadyPurchased) {
+				console.log('innnn');
+				this.service.addToCarts(obj).subscribe(data => {
+					console.log(data)
+					if (data.code == 200 || data.code == 201) {
+						//this.exam_details = data.details
+						this.router.navigate(['myCart']);
+					}		
+				}, err => {
+					console.log(err)
+					this.service.commonError(err)
+				})
+			} else {
+				console.log('else case')
+				this.toastr.error("Exam is already purchased");
+				// let error = {error: {
+				// 	message: {
+				// 		errors: 'already purchased'
+				// 	}
+				// }}
+				// this.service.commonError({error.message.errors: 'already purchased'});
+				return false;
+			}
+			console.log("Data:-----------------------11111111-> ", data);
+		    
+		})		
+    
+    
+    
+    save annd next
+    
+    
+    
+    if (item.answer_type == 'FillUp' && item.selectedAnswer) {
+      item.selectedAnswer.forEach(element => {
+        if (item.answer[0].correctOptions[element.index] != element.value) {
+          flag = false;
+        }
+      });
+    }
