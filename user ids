@@ -1,0 +1,6 @@
+console.log('generate CSV', this.selection.selected);
+		let ids = []
+		this.selection.selected.forEach(element => {
+			ids.push(element._id);
+		});
+		console.log('ids', ids);
