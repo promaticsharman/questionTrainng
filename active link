@@ -1,0 +1,1 @@
+ <li routerLinkActive="active" *ngFor="let menuItem of menuItems let i=index;" [ngClass]="{active: router.url.includes('/sub_category') && menuItem.path == '/category'}" class="{{menuItem.class}} nav-item">
