@@ -1,0 +1,32 @@
+                              <div class="video">
+                                    <!-- <video controls #videoPlayer>
+                                        <source src="{{videoPath}}{{video}}" type="video/mp4" />
+                                        Browser not supported
+                                    </video> -->
+                                        <iframe class="embed-responsive-item" [src]='video'></iframe>
+                                    <!-- <video width="320" height="240" controls>
+                                        <source src="{{videoPath}}{{video}}" type="video/mp4">
+                                      Your browser does not support the video tag.
+                                      </video> -->
+                                </div>
+                                
+                                *********************ts*************************
+                                import { DomSanitizer, SafeResourceUrl, SafeUrl} from '@angular/platform-browser';
+                                
+                                
+                                
+                                
+                                                                                             constructor(
+                                                                private sanitizer:DomSanitizer,
+                                                                private fb: FormBuilder,
+                                                                 private service: AdminService,
+                                                                  private route: ActivatedRoute,
+                                                                   private router: Router
+                                                              )
+                                
+                                
+                                
+                                                    let videoUrl = this.videoPath + element.video
+                                console.log(videoUrl);
+                                this.video = this.sanitizer.bypassSecurityTrustResourceUrl(videoUrl);
+                                console.log('videoUrl',this.video);
