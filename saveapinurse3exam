@@ -1,0 +1,40 @@
+Route
+
+
+router.post(
+	'/getContactUsById',
+	controller.getContactUsById
+	)
+  
+  
+  
+ controller
+ 
+ exports.getContactUsById = async (req, res) => {
+    try {
+        const item = await db.getContactUsById(ContactUsSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Contact Us Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+
+middleware dbs
+
+ async getContactUsById(model){
+        return new Promise((resolve, reject) => {
+            model.findOne().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
