@@ -1,0 +1,5497 @@
+Admin.js
+
+
+const jwt = require('jsonwebtoken')
+// const csv = require('csv-parser');
+var csv = require("csv-query");
+const fs = require('fs');
+const User = require('../models/user')
+const ExamDetails = require('../models/exam-details')
+const FAQ = require('../models/Faqs')
+const Testimonial = require('../models/testimonial.js')
+const ExamQues = require('../models/exam_questions.js')
+const ExamAns = require('../models/exam_answers.js')
+const Bookcategory = require('../models/book_category.js')
+const Books = require('../models/books.js')
+const UserAccess = require('../models/userAccess')
+const utils = require('../middleware/utils')
+const uuid = require('uuid')
+const {
+    addHours
+} = require('date-fns')
+const {
+    matchedData
+} = require('express-validator')
+const auth = require('../middleware/auth')
+const emailer = require('../middleware/emailer')
+const db = require('../middleware/admin_db')
+const HOURS_TO_BLOCK = 2
+const LOGIN_ATTEMPTS = 5
+// const _dir = '/var/www/html/NurseExam_apis/'
+const _dir = "/var/www/html/NurseExam/NurseExam_apis/"
+const fs2 = require("fs");
+const Chapter = require('../models/chapter')
+const Topic = require('../models/topic')
+const StudyMaterial = require('../models/study_material')
+const ExamOuestions = require('../models/exam_questions')
+const ExamAnswers = require('../models/exam_answers')
+const HomeBanner = require('../models/home_banner_list')
+const GeneralManagement = require('../models/general_management')
+const HomeManagement = require('../models/home_management')
+const ExamQuestion = require('../models/exam_question')
+const ExamAnswer = require('../models/exam_answer')
+const FreeQuestion = require('../models/free_question')
+const FreeAnswer = require('../models/free_answer')
+const Cart = require('../models/cart')
+const AdminSchema = require('../models/user_profile')
+const ContactUsSchema = require('../models/contact_us.js')
+const ContactUsSubjectSchema = require('../models/contactUs_subject.js')
+const AboutUsSchema = require('../models/about_us.js')
+const SocialMediaLinkSchema = require('../models/social_media_link.js')
+const PromoCodesSchema = require('../models/promo_codes.js')
+const Payment = require('../models/payments.js')
+const ContactMessageSchema = require('../models/contact_message.js')
+const EmailTemplate = require('../models/email_template.js')
+const KeyFeatures = require('../models/keyFeatures.js')  
+const GENERICFAQ = require('../models/genericFaq.js')
+/*********************
+ * Private functions *
+ *********************/
+function base64ImageUpload(path, imageReceived) {
+    var image;
+    var image_name = new Date().valueOf().toString() + Math.random().toString(36).slice(-8);
+    image = imageReceived.toString().split(";base64,");
+    var bitmap = Buffer.from(image[1], 'base64');
+    var imageType = image[0].split('/')[1];
+    var randomImageName = image_name + "." + imageType
+    var imagePath = path + "/"
+    fs2.writeFileSync(imagePath + randomImageName, bitmap);
+    // fs2.writeFileSync(imagePath + randomImageName, bitmap);
+    return randomImageName
+}
+
+function imageUpload(object) {
+
+    return new Promise((resolve, reject) => {
+        var obj = object.image_data
+        var imageName = Date.now() + obj.name
+        var string = imageName.replace(/[&\/\\#,+()$~%'":*?<>{}\s]/g, '_')
+        obj.mv(object.path + '/' + string, function(err) {
+            if (err) {
+                // reject(buildErrObject(422, err.message))
+                console.log(err)
+                resolve(null)
+            }
+            resolve(string)
+        })
+    })
+}
+
+
+/**
+ * Generates a token
+ * @param {Object} user - user object
+ */
+const generateToken = user => {
+    // Gets expiration time
+    const expiration =
+        Math.floor(Date.now() / 1000) + 60 * process.env.JWT_EXPIRATION_IN_MINUTES
+
+    // returns signed and encrypted token
+    return auth.encrypt(
+        jwt.sign({
+                data: {
+                    _id: user,
+                    type: "admin"
+                },
+                exp: expiration
+            },
+            process.env.JWT_SECRET
+        )
+    )
+}
+
+/**
+ * Creates an object with user info
+ * @param {Object} req - request object
+ */
+const setUserInfo = req => {
+    let user = {
+        _id: req._id,
+        first_name: req.first_name,
+        last_name: req.last_name,
+        email: req.email,
+        password: req.password,
+        exam_id: req.exam_id,
+        address: req.address,
+        state_id: req.state_id,
+        zipcode: req.zipcode,
+        verified: req.verified
+    }
+    // Adds verification for testing purposes
+    if (process.env.NODE_ENV !== 'production') {
+        user = {
+            ...user,
+            verification: req.verification
+        }
+    }
+    return user
+}
+
+/**
+ * Saves a new user access and then returns token
+ * @param {Object} req - request object
+ * @param {Object} user - user object
+ */
+const saveUserAccessAndReturnToken = async (req, user) => {
+    return new Promise((resolve, reject) => {
+        const userAccess = new UserAccess({
+            email: user.email,
+            ip: utils.getIP(req),
+            browser: utils.getBrowserInfo(req),
+            country: utils.getCountry(req)
+        })
+        userAccess.save(err => {
+            if (err) {
+                reject(utils.buildErrObject(422, err.message))
+            }
+            const userInfo = setUserInfo(user)
+            // Returns data with access token
+            resolve({
+                token: generateToken(user._id),
+                user: userInfo
+            })
+        })
+    })
+}
+
+/**
+ * Blocks a user by setting blockExpires to the specified date based on constant HOURS_TO_BLOCK
+ * @param {Object} user - user object
+ */
+const blockUser = async user => {
+    return new Promise((resolve, reject) => {
+        user.blockExpires = addHours(new Date(), HOURS_TO_BLOCK)
+        user.save((err, result) => {
+            if (err) {
+                reject(utils.buildErrObject(422, err.message))
+            }
+            if (result) {
+                resolve(utils.buildErrObject(409, 'BLOCKED_USER'))
+            }
+        })
+    })
+}
+
+/**
+ * Saves login attempts to dabatabse
+ * @param {Object} user - user object
+ */
+const saveLoginAttemptsToDB = async user => {
+    return new Promise((resolve, reject) => {
+        user.save((err, result) => {
+            if (err) {
+                reject(utils.buildErrObject(422, err.message))
+            }
+            if (result) {
+                resolve(true)
+            }
+        })
+    })
+}
+
+/**
+ * Checks that login attempts are greater than specified in constant and also that blockexpires is less than now
+ * @param {Object} user - user object
+ */
+const blockIsExpired = user =>
+    user.loginAttempts > LOGIN_ATTEMPTS && user.blockExpires <= new Date()
+
+/**
+ *
+ * @param {Object} user - user object.
+ */
+const checkLoginAttemptsAndBlockExpires = async user => {
+    return new Promise((resolve, reject) => {
+        // Let user try to login again after blockexpires, resets user loginAttempts
+        if (blockIsExpired(user)) {
+            user.loginAttempts = 0
+            user.save((err, result) => {
+                if (err) {
+                    reject(utils.buildErrObject(422, err.message))
+                }
+                if (result) {
+                    resolve(true)
+                }
+            })
+        } else {
+            // User is not blocked, check password (normal behaviour)
+            resolve(true)
+        }
+    })
+}
+
+/**
+ * Checks if blockExpires from user is greater than now
+ * @param {Object} user - user object
+ */
+const userIsBlocked = async user => {
+    return new Promise((resolve, reject) => {
+        if (user.blockExpires > new Date()) {
+            reject(utils.buildErrObject(409, 'BLOCKED_USER'))
+        }
+        resolve(true)
+    })
+}
+
+/**
+ * Finds user by email
+ * @param {string} email - user´s email
+ */
+const findUser = async email => {
+    return new Promise((resolve, reject) => {
+        User.findOne({
+                email
+            },
+            // 'password loginAttempts blockExpires name email role verified verification',
+            (err, item) => {
+                utils.itemNotFound(err, item, reject, 'USER_DOES_NOT_EXIST')
+                resolve(item)
+            }
+        )
+    })
+}
+
+/**
+ * Finds user by ID
+ * @param {string} id - user´s id
+ */
+const findUserById = async userId => {
+    return new Promise((resolve, reject) => {
+        User.findById(userId, (err, item) => {
+            utils.itemNotFound(err, item, reject, 'USER_DOES_NOT_EXIST')
+            resolve(item)
+        })
+    })
+}
+
+/**
+ * Adds one attempt to loginAttempts, then compares loginAttempts with the constant LOGIN_ATTEMPTS, if is less returns wrong password, else returns blockUser function
+ * @param {Object} user - user object
+ */
+const passwordsDoNotMatch = async user => {
+    user.loginAttempts += 1
+    await saveLoginAttemptsToDB(user)
+    return new Promise((resolve, reject) => {
+        if (user.loginAttempts <= LOGIN_ATTEMPTS) {
+            resolve(utils.buildErrObject(409, 'WRONG_PASSWORD'))
+        } else {
+            resolve(blockUser(user))
+        }
+        reject(utils.buildErrObject(422, 'ERROR'))
+    })
+}
+
+/**
+ * Registers a new user in database
+ * @param {Object} req - request object
+ */
+const registerUser = async req => {
+    return new Promise((resolve, reject) => {
+        const user = new User({
+            first_name: req.first_name,
+            last_name: req.last_name,
+            email: req.email,
+            password: req.password,
+            address: req.address,
+            state_id: req.state_id,
+            zipcode: req.zipcode
+            // verification: uuid.v4()
+        })
+        user.save((err, item) => {
+            if (err) {
+                reject(utils.buildErrObject(422, err.message))
+            }
+            resolve(item)
+        })
+    })
+}
+
+/**
+ * Builds the registration token
+ * @param {Object} item - user object that contains created id
+ * @param {Object} userInfo - user object
+ */
+const returnRegisterToken = (item, userInfo) => {
+    if (process.env.NODE_ENV !== 'production') {
+        userInfo.verification = item.verification
+    }
+    const data = {
+        token: generateToken(item._id),
+        user: userInfo
+    }
+    return data
+}
+
+/**
+ * Checks if verification id exists for user
+ * @param {string} id - verification id
+ */
+const verificationExists = async id => {
+    return new Promise((resolve, reject) => {
+        User.findOne({
+                verification: id,
+                verified: false
+            },
+            (err, user) => {
+                utils.itemNotFound(err, user, reject, 'NOT_FOUND_OR_ALREADY_VERIFIED')
+                resolve(user)
+            }
+        )
+    })
+}
+
+/**
+ * Verifies an user
+ * @param {Object} user - user object
+ */
+const verifyUser = async user => {
+    return new Promise((resolve, reject) => {
+        user.verified = true
+        user.save((err, item) => {
+            if (err) {
+                reject(utils.buildErrObject(422, err.message))
+            }
+            resolve({
+                email: item.email,
+                verified: item.verified
+            })
+        })
+    })
+}
+
+/**
+ * Marks a request to reset password as used
+ * @param {Object} req - request object
+ * @param {Object} forgot - forgot object
+ */
+const markResetPasswordAsUsed = async (req, forgot) => {
+    return new Promise((resolve, reject) => {
+        forgot.used = true
+        forgot.ipChanged = utils.getIP(req)
+        forgot.browserChanged = utils.getBrowserInfo(req)
+        forgot.countryChanged = utils.getCountry(req)
+        forgot.save((err, item) => {
+            utils.itemNotFound(err, item, reject, 'NOT_FOUND')
+            resolve(utils.buildSuccObject('PASSWORD_CHANGED'))
+        })
+    })
+}
+
+/**
+ * Updates a user password in database
+ * @param {string} password - new password
+ * @param {Object} user - user object
+ */
+const updatePassword = async (password, user) => {
+    return new Promise((resolve, reject) => {
+        user.password = password
+        user.save((err, item) => {
+            utils.itemNotFound(err, item, reject, 'NOT_FOUND')
+            resolve(item)
+        })
+    })
+}
+
+/**
+ * Finds user by email to reset password
+ * @param {string} email - user email
+ */
+const findUserToResetPassword = async email => {
+    return new Promise((resolve, reject) => {
+        User.findOne({
+                email
+            },
+            (err, user) => {
+                utils.itemNotFound(err, user, reject, 'NOT_FOUND')
+                resolve(user)
+            }
+        )
+    })
+}
+
+
+/**
+ * Checks against user if has quested role
+ * @param {Object} data - data object
+ * @param {*} next - next callback
+ */
+const checkPermissions = async (data, next) => {
+    return new Promise((resolve, reject) => {
+        User.findById(data.id, (err, result) => {
+            utils.itemNotFound(err, result, reject, 'NOT_FOUND')
+            if (data.roles.indexOf(result.role) > -1) {
+                return resolve(next())
+            }
+            return reject(utils.buildErrObject(401, 'UNAUTHORIZED'))
+        })
+    })
+}
+
+/**
+ * Gets user id from token
+ * @param {string} token - Encrypted and encoded token
+ */
+const getUserIdFromToken = async token => {
+    return new Promise((resolve, reject) => {
+        // Decrypts, verifies and decode token
+        jwt.verify(auth.decrypt(token), process.env.JWT_SECRET, (err, decoded) => {
+            if (err) {
+                reject(utils.buildErrObject(409, 'BAD_TOKEN'))
+            }
+            resolve(decoded.data._id)
+        })
+    })
+}
+
+/********************
+ * Public functions *
+ ********************/
+
+/**
+ * Login function called by route
+ * @param {Object} req - request object
+ * @param {Object} res - response object
+ */
+exports.login = async (req, res) => {
+    try {
+        const data = matchedData(req)
+        const user = await findUser(data.email)
+        await userIsBlocked(user)
+        await checkLoginAttemptsAndBlockExpires(user)
+        const isPasswordMatch = await auth.checkPassword(data.password, user)
+        if (!isPasswordMatch) {
+            utils.handleError(res, await passwordsDoNotMatch(user))
+        } else {
+            if (user.verified) {
+                // all ok, register access and return token
+                user.loginAttempts = 0
+                await saveLoginAttemptsToDB(user)
+                res.status(200).json(await saveUserAccessAndReturnToken(req, user))
+            } else {
+                res.status(403).json({
+                    code: 403,
+                    errors: {
+                        msg: "Email not verified"
+                    }
+                })
+            }
+        }
+    } catch (error) {
+        utils.handleError(res, error)
+    }
+}
+
+/**
+ * Register function called by route
+ * @param {Object} req - request object
+ * @param {Object} res - response object
+ */
+exports.register = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        const locale = req.getLocale()
+        req = matchedData(req)
+        const doesEmailExists = await emailer.emailExists(req.email)
+        if (!doesEmailExists) {
+            const item = await registerUser(req)
+            const userInfo = setUserInfo(item)
+            const response = returnRegisterToken(item, userInfo)
+            emailer.sendRegistrationEmail(locale, item)
+            res.status(201).json(response)
+        }
+    } catch (error) {
+        console.log(error)
+        utils.handleError(res, error)
+    }
+}
+
+/**
+ * Verify function called by route
+ * @param {Object} req - request object
+ * @param {Object} res - response object
+ */
+// exports.verify = async (req, res) => {
+//   try {
+//     req = matchedData(req)
+//     const user = await verificationExists(req.id)
+//     res.status(200).json(await verifyUser(user))
+//   } catch (error) {
+//     utils.handleError(res, error)
+//   }
+// }
+exports.verifyEmail = async (req, res) => {
+
+    jwt.verify(req.params.token, process.env.JWT_SECRET, function(err, decoded) {
+        if (err) {
+            console.log(err);
+            res.status(422).send("<h1> Token has been expired or invalid </h1>")
+            //utils.handleError(res, err)
+        } else {
+            console.log(decoded);
+            User.updateOne({
+                _id: decoded.data
+            }, {
+                verified: true,
+            }, function(err, affected, resp) {
+
+                res.status(201).send("<h1> Email Verified Successfully </h1>")
+
+            }).catch(err => {
+                console.log(err);
+                res.status(201).send("<h1 style='color:red'> Something Went Wrong </h1>")
+
+            })
+
+        }
+    });
+
+
+}
+
+
+/**
+ * Refresh token function called by route
+ * @param {Object} req - request object
+ * @param {Object} res - response object
+ */
+exports.getRefreshToken = async (req, res) => {
+    try {
+        const tokenEncrypted = req.headers.authorization
+            .replace('Bearer ', '')
+            .trim()
+        let userId = await getUserIdFromToken(tokenEncrypted)
+        userId = await utils.isIDGood(userId)
+        const user = await findUserById(userId)
+        const token = await saveUserAccessAndReturnToken(req, user)
+        // Removes user info from response
+        delete token.user
+        res.status(200).json(token)
+    } catch (error) {
+        utils.handleError(res, error)
+    }
+}
+
+/**
+ * Roles authorization function called by route
+ * @param {Array} roles - roles specified on the route
+ */
+exports.roleAuthorization = roles => async (req, res, next) => {
+    try {
+        const data = {
+            id: req.user._id,
+            roles
+        }
+        await checkPermissions(data, next)
+    } catch (error) {
+        utils.handleError(res, error)
+    }
+}
+
+exports.checkEmailExist = async (req, res) => {
+    try {
+        User.findOne({
+            email: req.body.search_text
+        }).then(exist => {
+            if (exist) {
+                res.json({
+                    code: 200,
+                    valid: "no"
+                })
+            } else {
+                res.json({
+                    code: 200,
+                    valid: "yes"
+                })
+            }
+        })
+    } catch (error) {
+        utils.handleError(res, error)
+    }
+}
+
+exports.test = async (req, res) => {
+    try {
+        res.status(200).json({
+            code: 200,
+            msg: "ITS WORKING"
+        })
+    } catch (error) {
+        utils.handleError(res, error)
+    }
+}
+
+exports.createExamDetails = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        // const locale = req.getLocale()
+        console.log('reqfiles=============', req.body);
+        console.log('reqfiles=============', req.files);
+        console.log('Banner Image =============', req.files.banner_image);
+        if (req.files && req.files.uploadFileInput) {
+            const image_name = await imageUpload({
+                image_data: req.files.uploadFileInput,
+                path: _dir + 'public/exam_image'
+            });
+            req.body.image = image_name;
+        }
+        if (req.files && req.files.banner_image) {
+            const banner_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/exam_image'
+            });
+            req.body.banner_image = banner_name;
+        }
+        var description = JSON.parse(req.body.description)
+        req.body.description = description
+        req = req.body
+        console.log("Request After Upload : ", req)
+        //console.log('req=============',req);
+        const item = await db.createItem(req, ExamDetails)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+
+exports.getExamDetails = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        // const locale = req.getLocale()
+
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, ExamDetails)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getExams = async (req, res) => {
+    try {
+        const exams = await db.getAllExams(req, ExamDetails);
+        res.status(201).json({
+            data: exams,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.deleteExam = async (req, res) => {
+    try {
+        const del = await db.deleteItem(req.body.id, ExamDetails);
+        res.status(201).json({
+            data: del,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.editExam = async (req, res) => {
+    try {
+
+        if (req.files && req.files.uploadFileInput) {
+            const image_name = await imageUpload({
+                image_data: req.files.uploadFileInput,
+                path: _dir + 'public/exam_image'
+            });
+            req.body.image = image_name;
+        }
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/exam_image'
+            });
+            req.body.banner_image = image_name;
+        }
+        var description = JSON.parse(req.body.description)
+        req.body.description = description
+        const edit = await db.updateItem(req.body.id, ExamDetails, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.createFaq = async (req, res) => {
+    try {
+        const addFaq = await db.createItem(req.body, FAQ);
+        res.status(201).json({
+            data: addFaq,
+            code: 200
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+
+exports.getFaqs = async (req, res) => {
+    try {
+        const faqs = await db.getAllExams(req, FAQ);
+        res.status(201).json(faqs);
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.deleteFaq = async (req, res) => {
+    try {
+        const del = await db.deleteItem(req.body.id, FAQ);
+        res.status(201).json({
+            data: del,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.editFaqs = async (req, res) => {
+    try {
+        const del = await db.updateItem(req.body.id, FAQ, req.body);
+        res.status(201).json({
+            data: del,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.addTestimonial = async (req, res) => {
+    try {
+        console.log('reqfiles=============', req.body);
+        console.log('reqfiles=============', req.files);
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.image,
+                path: _dir + 'public/testimonial'
+            });
+            req.body.image = image_name;
+        }
+        req = req.body
+
+        //console.log('req=============',req);
+        const item = await db.createItem(req, Testimonial)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getTestimonial = async (req, res) => {
+    try {
+        const faqs = await db.getTestimonial(req, Testimonial);
+        res.status(201).json(faqs);
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.deleteTestimonial = async (req, res) => {
+    try {
+        const del = await db.deleteItem(req.body.id, Testimonial);
+        res.status(201).json({
+            data: del,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.updateTestimonial = async (req, res) => {
+    try {
+
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.image,
+                path: _dir + 'public/testimonial'
+            });
+            req.body.image = image_name;
+        }
+        const edit = await db.updateItem(req.body.id, Testimonial, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.getFaqById = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        // const locale = req.getLocale()
+
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, FAQ)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getTestimonialById = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        // const locale = req.getLocale()
+
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, Testimonial)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addExamQuestionAns = async (req, res) => {
+
+    try {
+        var data = req.body
+        //console.log('req=============',data);
+        const item = await db.addExamQuestionAns(ExamQues, ExamAns, data)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getExamList = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log('req=============',req);
+        const item = await db.getAllItems(ExamDetails)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getBookCategory = async (req, res) => {
+    try {
+        const item = await db.getBookCategory(req, Bookcategory)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addBookCategory = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log('req=============',req);
+        const item = await db.createItem(data, Bookcategory)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.editBookCategory = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log('req=============',req);
+        const item = await db.updateItem(data.id, Bookcategory, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.deleteBookCategory = async (req, res) => {
+    try {
+        const del = await db.deleteItem(req.body.id, Bookcategory);
+        res.status(201).json({
+            data: del,
+            code: 201
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.getBookcategoryById = async (req, res) => {
+    try {
+        // Gets locale from header 'Accept-Language'
+        // const locale = req.getLocale()
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, Bookcategory)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getAllBookCategory = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log('req=============',req);
+        const item = await db.getAllItems(Bookcategory)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getExamQuestions = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.getExamQuestions(data, ExamQues)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addBook = async (req, res) => {
+    try {
+        req = req.body
+        console.log("Book : ", req)
+        const item = await db.createItem(req, Books)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log("Add Books Error : ", error)
+        handleError(res, error)
+    }
+}
+
+exports.editBook = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.updateItem(data.id, Books, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        handleError(res, error)
+    }
+}
+
+exports.delBook = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, Books)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        handleError(res, error)
+    }
+}
+
+exports.getBookByCategoryId = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log("===body",data)
+        const item = await db.getBookByCategoryId(data, Books)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log("error====", error)
+        handleError(res, error)
+    }
+}
+
+exports.getBookById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, Books)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addChapter = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log("Chapter Req. : ",data);
+        const item = await db.createItem(data, Chapter)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Add Chapter : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.allChapter = async (req, res) => {
+    try {
+        const item = await db.getAllChapter(req, Chapter)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Add Chapter : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getChapterById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log("Get Chapter By ID : ",req)
+        const item = await db.getItem(req.id, Chapter)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Chapter By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.updateChapter = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.updateItem(data.id, Chapter, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Update Chapter By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.deleteChapter = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, Chapter)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Chapter By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.addTopics = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log("Topics Req. : ",data);
+        const item = await db.createItem(data, Topic)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Add Topics : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.allTopic = async (req, res) => {
+    try {
+        const item = await db.getAllTopic(req, Topic)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Topic : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getTopicById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log("Get Topic By ID : ",req)
+        const item = await db.getItem(req.id, Topic)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Chapter By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.updateTopic = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.updateItem(data.id, Topic, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Update Topic By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.deleteTopic = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, Topic)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Topic By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.addStudyMaterial = async (req, res) => {
+    try {
+        console.log('Add Study Material Data : ', req.body);
+        console.log('Add Study Material File : ', req.files);
+
+        if (req.files && req.files.pdfFile) {
+            const file_name = await imageUpload({
+                image_data: req.files.pdfFile,
+                path: _dir + 'public/exam_pdf'
+            });
+            console.log("filename: ", file_name)
+            req.body.pdfFile = file_name
+        }
+        // req = req.body
+        // console.log('Add Study Material Request : ',req);
+        const item = await db.createItem(req.body, StudyMaterial)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Add Study Material Error : ', error)
+        handleError(res, error)
+    }
+}
+
+exports.getAllStudyMaterial = async (req, res) => {
+    try {
+        const item = await db.getAllStudyMaterial(req, StudyMaterial)
+        //console.log("Study Material : ", item);
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Study Material Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getStudyMaterialById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log("Get Study Material By ID : ",req)
+        const item = await db.getItem(req.id, StudyMaterial)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Study Material By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.updateStudyMaterial = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.updateItem(data.id, StudyMaterial, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Update Study Material By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.deleteStudyMaterial = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, StudyMaterial)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Study Material By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getQuestionAnswersById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log("Get Questions By ID : ",req)
+        const item = await db.getQuestionAnswersById(req, ExamOuestions)
+        // const answers = await db.getQuestionAnswersById(req.id, ExamAnswers)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Questions By ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.updateExamQuestionAns = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log(data);
+        const item = await db.updateExamQuestionAns(ExamQues, ExamAns, data)
+        res.status(201).json({
+            code: 200
+        })
+    } catch (error) {
+        console.log('Update Exam Questions Errpr', error)
+        handleError(res, error)
+    }
+}
+
+exports.deleteQuestions = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, ExamQues)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Study Material By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.addHomeBanner = async (req, res) => {
+    try {
+        console.log('reqfiles=============', req.body);
+        console.log('reqfiles=============', req.files);
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/HomeBanner'
+            });
+            req.body.banner_image = image_name;
+        }
+
+        req = req.body
+
+        //console.log('req=============',req);
+        const item = await db.createItem(req, HomeBanner)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addGeneralManagement = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.createItem(req, GeneralManagement)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getGeneralManagement = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getGeneralManagement(req, GeneralManagement)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.updateGeneralManagement = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.updateGeneralManagement(req, GeneralManagement)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getHomeBanners = async (req, res) => {
+    try {
+        const data = await db.getAllItemsWithPagination(req, HomeBanner);
+        res.status(201).json(data);
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.editHomeBanner = async (req, res) => {
+    try {
+        var data = req.body
+        console.log("Home Banner Data: ",data)
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/HomeBanner'
+            });
+            req.body.banner_image = image_name;
+        }
+        const edit = await db.updateItem(req.body.id, HomeBanner, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+exports.deleteHomeBanner = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, HomeBanner)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Topic By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getHomeBannerById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, HomeBanner)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.addHomePageContent = async (req, res) => {
+    try {
+        var data = req.body
+        // data.attachment = ''
+        console.log('req=============', data);
+        if (req.files) {
+            //console.log(req.files)
+            const image_name = await imageUpload({
+                image_data: req.files.attachment,
+                path: _dir + 'public/HomeBanner'
+            });
+            data.attachment = image_name;
+        }
+        const item = await db.addHomePageContent(data, HomeManagement)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.getChapterByExamId = async (req, res) => {
+    try {
+        const item = await db.getChapterByExamId(req, Chapter)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Chapter By Exam ID : ', error);
+        handleError(res, error)
+    }
+}
+
+
+
+exports.addQuestion = async (req, res) => {
+    try {
+        var data = req.body
+        console.log("Add Question : ", data)
+        const item = await db.addQuestionAnswerOfExam(ExamQuestion, ExamAnswer, data)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Add Question : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getQuestionsByTopicID = async (req, res) => {
+    try {
+        const item = await db.getQuestionsByTopicID(req, ExamQuestion)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Questions By Topic ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getQuestionsByID = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('Get Question By ID : ',req);
+        const item = await db.getQuestionsByID(req, ExamQuestion)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Question By ID Error: ', error)
+        handleError(res, error)
+    }
+}
+
+exports.updateQuestionAnswerOfTopic = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log(data);
+        const item = await db.updateQuestionAnswerOfTopic(ExamQuestion, ExamAnswer, data)
+        res.status(201).json({
+            code: 200
+        })
+    } catch (error) {
+        console.log('Update Exam Questions Error', error)
+        handleError(res, error)
+    }
+}
+
+exports.deleteQuestionAnswerOfTopic = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, ExamQuestion)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Question of Topic By ID Error : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getFaqsByExamID = async (req, res) => {
+    try {
+        const item = await db.getFaqsByExamID(req, FAQ)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get FAQ By Exam ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getTopicsByChapterID = async (req, res) => {
+    try {
+        const item = await db.getTopicsByChapterID(req, Topic)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Topics By Chapter ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getStudyMaterialByTopicID = async (req, res) => {
+    try {
+        const item = await db.getStudyMaterialByTopicID(req, StudyMaterial)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Study Material By Topic ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.addFreeQues = async (req, res) => {
+    try {
+        var data = req.body
+        console.log("Add Question : ", data)
+        const item = await db.addQuestionAnswerOfExam(FreeQuestion, FreeAnswer, data)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Add Question : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getFreeQuestionsByTopicID = async (req, res) => {
+    try {
+        const item = await db.getQuestionsByTopicID(req, FreeQuestion)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get Questions By Topic ID : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.addCart = async (req, res) => {
+    try {
+        //console.log(JSON.parse(req.body.feature))
+        var data = req.body
+        data.feature = JSON.parse(req.body.feature)
+        console.log("Add Cart Data: ", data)
+        const item = await db.createItem(data, Cart)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Add Cart : ', error);
+        handleError(res, error)
+    }
+}
+
+exports.getAllCarts = async (req, res) => {
+    try {
+        const item = await db.getAllCarts(req, Cart)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Cart : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getCartsById = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.getItem(req.id, Cart)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Cart By ID : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateCart = async (req, res) => {
+    try {
+        var data = req.body
+        data.feature = JSON.parse(req.body.feature)
+        console.log("Update Cart Data: ", data)
+        const edit = await db.updateItem(req.body.id, Cart, data);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update Cart Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deleteCart = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, Cart)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Cart By ID Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.saveAdminProfile = async (req, res) => {
+    try {
+        console.log("Admin Body: ", req.body)
+        console.log("Admin File: ", req.files)
+        if (req.files && req.files.profile_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.profile_image,
+                path: _dir + 'public/AdminProfileImage'
+            });
+            req.body.profile_image = image_name
+        }
+        var data = req.body
+        console.log("Admin Data: ", data);
+        const item = await db.createItem(data, AdminSchema);
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log("Admin Profile : ", error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.getAdminProfileList = async (req, res) => {
+    try {
+        const data = await db.getAllItemsWithPagination(req, AdminSchema)
+        res.status(201).json(data);
+    } catch (error) {
+        console.log(error);
+    }
+}
+
+exports.getAdminProfileById = async (req, res) => {
+    try {
+        const item = await db.getAdminProfile(AdminSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Admin Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateAdminProfile = async (req, res) => {
+    try {
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.profile_image,
+                path: _dir + 'public/AdminProfileImage'
+            });
+            req.body.profile_image = image_name
+        }
+        console.log("Admin Body : ", req.body.id);
+        const edit = await db.updateItem(req.body.id, AdminSchema, req.body)
+        console.log("Update Admin Profile : ", edit)
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log("Update Admin Profile Error: ", error);
+    }
+}
+
+exports.deleteAdminProfile = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, AdminSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Admin By ID Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.adminLogin = async (req, res) => {
+    try {
+        var data = req.body;
+        console.log("Admin Login Data : ", data)
+        const item = await db.adminLogin(data, AdminSchema)
+        item.token = generateToken(item.data._id),
+            console.log("Item: ", item)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Login Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.userListing = async (req, res) => {
+    try {
+        const item = await db.userListing(req, User);
+        res.status(201).json(item);
+    } catch (error) {
+        console.log('User Listing Error: ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getUserById = async (req, res) => {
+    try {
+        req = req.body;
+        const item = await db.getUserById(req, User)
+        res.status(201).json(item);
+    } catch (error) {
+        console.log('Get User Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateUser = async (req, res) => {
+    try {
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.profile_image,
+                path: _dir + 'public/profile_image'
+            });
+            req.body.profile_image = image_name
+        }
+        console.log("User Body : ", req.body.id);
+        const edit = await db.updateItem(req.body.id, User, req.body)
+        console.log("Update User Profile : ", edit)
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log("Update User Error: ", error);
+    }
+}
+
+exports.deleteUser = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, User)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete User By ID Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.filterUser = async (req, res) => {
+    try {
+        req = req.body;
+        console.log("Filter User Req: ", req)
+        const item = await db.filterUser(req, User)
+        res.status(201).json(item);
+    } catch (error) {
+        console.log('Filter User Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.dummyCreate = async (req, res) => {
+    try {
+        console.log("Dummy Create Image : ", req.files)
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/ContactUsImage'
+            });
+            req.body.banner_image = image_name
+        }
+        var body = req.body
+        console.log("Dummy Data: ", body);
+        const item = await db.createItem(body, ContactUsSchema);
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log("Dummy Create Error: ", error);
+    }
+}
+
+exports.getContactUsById = async (req, res) => {
+    try {
+        const item = await db.getContactUsById(ContactUsSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Contact Us Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateContactUs = async (req, res) => {
+    try {
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/ContactUsImage'
+            });
+            req.body.banner_image = image_name
+        }
+        console.log("Contact Us Body : ", req.body.id);
+        const edit = await db.updateItem(req.body.id, ContactUsSchema, req.body)
+        console.log("Update Contact Us : ", edit)
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update Contact Us Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.createContactUsSubject = async (req, res) => {
+    try {
+        var body = req.body
+        console.log("Subject Data", body);
+        const item = await db.createItem(body, ContactUsSubjectSchema);
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Create Contact Us Subject By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.getAllContactUsSubject = async (req, res) => {
+    try {
+        const item = await db.getAllContactUsSubject(req, ContactUsSubjectSchema)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Contact Us Subject : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getContactUsSubjectById = async (req, res) => {
+    try {
+        req = req.body
+        const item = await db.getContactUsSubjectById(req, ContactUsSubjectSchema)
+        res.status(201).json(item);
+    } catch (error) {
+        console.log('Get Contact Us Subject By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateContactUsSubject = async (req, res) => {
+    try {
+        const edit = await db.updateItem(req.body.id, ContactUsSubjectSchema, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update Contact Us Subject By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deleteContactUsSubject = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, ContactUsSubjectSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Contact Us Subject By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.saveAboutUs = async (req, res) => {
+    try {
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/AboutUsImage'
+            });
+            req.body.banner_image = image_name
+        }
+        if (req.files && req.files.image_one) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_one,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_one = image_name
+        }
+        if (req.files && req.files.image_two) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_two,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_two = image_name
+        }
+        if (req.files && req.files.image_three) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_three,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_three = image_name
+        }
+        if (req.files && req.files.icon_image_one) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_one,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_one = image_name
+        }
+        if (req.files && req.files.icon_image_two) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_two,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_two = image_name
+        }
+        if (req.files && req.files.icon_image_three) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_three,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_three = image_name
+        }
+        var body = req.body
+        console.log("About Us Data: ", body);
+        const item = await db.saveAboutUs(body, AboutUsSchema);
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Save About Us Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getAboutUsById = async (req, res) => {
+    try {
+        const item = await db.getAboutUsById(AboutUsSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get About Us Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateAboutUs = async (req, res) => {
+    try {
+        if (req.files && req.files.banner_image) {
+            const image_name = await imageUpload({
+                image_data: req.files.banner_image,
+                path: _dir + 'public/AboutUsImage'
+            });
+            req.body.banner_image = image_name
+        }
+        if (req.files && req.files.image_one) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_one,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_one = image_name
+        }
+        if (req.files && req.files.image_two) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_two,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_two = image_name
+        }
+        if (req.files && req.files.image_three) {
+            const image_name = await imageUpload({
+                image_data: req.files.image_three,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.image_three = image_name
+        }
+        if (req.files && req.files.icon_image_one) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_one,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_one = image_name
+        }
+        if (req.files && req.files.icon_image_two) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_two,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_two = image_name
+        }
+        if (req.files && req.files.icon_image_three) {
+            const image_name = await imageUpload({
+                image_data: req.files.icon_image_three,
+                path: _dir + 'public/AboutUsImage'
+            })
+            req.body.icon_image_three = image_name
+        }
+        var body = req.body
+        console.log("About Us Data: ", body);
+        const item = await db.updateItem(body.id, AboutUsSchema, body);
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Save About Us Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getAllSocialMedialLink = async (req, res) => {
+    try {
+        const item = await db.getAllSocialMedialLink(req, SocialMediaLinkSchema)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Social Media Link Error: ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.addSocialMediaLink = async (req, res) => {
+    try {
+        var body = req.body
+        console.log("Social Media Body : ", body)
+        const data = await db.createItem(body, SocialMediaLinkSchema)
+        res.status(201).json({
+            data: data,
+            code: 201
+        })
+    } catch (error) {
+        console.log("Add Social Media Link Error: ", error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateSocialMediaByType = async (req, res) => {
+    try {
+        var body = req.body
+        console.log("Update Social Media : ", body)
+        const data = await db.updateSocialMediaByType(body, SocialMediaLinkSchema)
+        res.status(201).json({
+            data: data,
+            code: 201
+        })
+    } catch (error) {
+        console.log("Add Social Media Link Error: ", error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.getSocialMediaLinkById = async (req, res) => {
+    try {
+        var body = req.body
+        const item = await db.getSocialMediaLinkById(body, SocialMediaLinkSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Social Media Link By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateSocialMediaLinkById = async (req, res) => {
+    try {
+        const edit = await db.updateItem(req.body.id, SocialMediaLinkSchema, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update Social Media Link By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deleteSocialMediaLink = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, SocialMediaLinkSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Contact Us Subject By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.addPromoCodes = async (req, res) => {
+    try {
+        var body = req.body
+        //console.log("Promocode : ",body)
+        console.log("Add Promo Codes Body : ", body)
+        const item = await db.addPromoCodes(body, PromoCodesSchema)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Add Promo Codes Error: ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getAllPromoCodes = async (req, res) => {
+    try {
+        const item = await db.getAllPromoCodes(req, PromoCodesSchema)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All Promo Codes Error: ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getPromoCodesById = async (req, res) => {
+    try {
+        req = req.body
+        const item = await db.getPromoCodesById(req, PromoCodesSchema)
+        res.status(201).json(item);
+    } catch (error) {
+        console.log('Get Promo Code By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.updatePromoCodeById = async (req, res) => {
+    try {
+        const edit = await db.updateItem(req.body.id, PromoCodesSchema, req.body);
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update Promo Code By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deletePromoCode = async (req, res) => {
+    try {
+        var data = req.body
+        const item = await db.deleteItem(data.id, PromoCodesSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Promo Code By Id : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.generateCSV = async (req, res) => {
+    try {
+        const item = await db.generateCSVFile(User);
+        //console.log("File Export to Csv")
+        res.status(201).send(item)
+    } catch (error) {
+        console.log('File Export To CSV Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.generatePdf = async (req, res) => {
+    try {
+        req = req.body
+        const allData = await db.getData(req, Topic)
+        const item = await db.pdfGenerate(req, ExamQuestion, allData);
+        console.log("File Export to PDF")
+        item.allData = allData
+        res.status(201).send(item)
+    } catch (error) {
+        console.log('File Export To CSV Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.revenueGraph = async (req, res) => {
+    try {
+        const data = await db.revenueGraph({}, Payment)
+        console.log("Revenue Graph: ", data)
+        res.status(201).send(data);
+    } catch (error) {
+        console.log('Revenue Graph Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.demoData = async (req, res) => {
+    try {
+        req = req.body
+        const data = await db.dataDemo(req, Topic, ExamQuestion)
+        res.status(201).send(data)
+    } catch (error) {
+        console.log('Data Demo Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.ContactMessages = async (req, res) => {
+    try {
+        const item = await db.getContactMessages(req, ContactMessageSchema)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Contact Message Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getContactMessageById = async (req, res) => {
+    try {
+        req = req.body
+        const data = await db.getContactMessageById(req, ContactMessageSchema)
+        res.status(201).json(data)
+    } catch (error) {
+        console.log('Get Contact Message by ID : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.replyMessage = async (req, res) => {
+    try {
+        req = req.body
+        const data = await db.replyMessage(req, ContactMessageSchema)
+        res.status(201).json({
+            data: data,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Get Contact Message by ID : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deleteMessage = async (req, res) => {
+    try {
+        req = req.body
+        console.log(req);
+        return
+        const item = await db.deleteMessage(req, ContactMessageSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Message Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.userGraph = async (req, res) => {
+    try {
+        const data = await db.userGraph({}, User)
+        console.log("User Graph: ", data)
+        res.status(201).send(data);
+    } catch (error) {
+        console.log('User Graph Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.totalCount = async (req, res) => {
+    try {
+        const userCount = await db.userCount({}, User)
+        const totalEarnings = await db.totalEarning({}, Payment)
+        const chapterCount = await db.chapterCount({}, Chapter)
+        const paidQuestionCount = await db.paidQuestionCount({}, ExamQuestion)
+        // const freeQuestionCount = await db.freeQuestionCount({}, ExamQuestion)
+        res.status(201).json({
+            code: 200,
+            userCount: userCount,
+            totalEarnings: totalEarnings,
+            chapterCount: chapterCount,
+            paidQuestionCount: paidQuestionCount,
+            // freeQuestionCount: freeQuestionCount
+        });
+    } catch (error) {
+        console.log('Total Count Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.deleteMessageById = async (req, res) => {
+    try {
+        const item = await db.deleteItem(req.body.id, ContactMessageSchema)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+    } catch (error) {
+        console.log('Delete Message By Id Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.getLatestUsers = async (req, res) => {
+    try {
+        const data = await db.getLatestUsers({}, User)
+        res.status(201).send(data)
+    } catch (error) {
+        console.log('Get Latest Users Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+
+
+exports.addSingleAnsTypeQuestion = async (req, res) => {
+        console.log("req.files==>", req.files)
+        console.log("req.body===>", req.body)
+    try {
+        //const data = await db.addSingleAnsTypeQuestion({},User)
+        var body = req.body
+        const image_name = await imageUpload({
+            image_data: req.files.csv,
+            path: _dir + 'public/ques_csv'
+        });
+        var path = await _dir + 'public/ques_csv/' + image_name
+        console.log('path==', path)
+        await csv.createFromFile(path).then(function(db) {
+            return db.find({})
+        }).then(async record => {
+            console.log("===record", record)
+            await record.forEach(async (element,index)=> {
+                var ans = []
+                var data = {
+                    answerArray: element.answer.split('~'),
+                    question:  element.question,
+                    exam_id: body.exam_id,
+                    topic_id: body.topic_id,
+                    answer_type: element.type,
+                    answer_description: element.description,
+                    correct_ans: element.correct.split('~')
+                    // question_type: body.question_type
+                }
+                data.answer = await db.ansObj(data)
+                console.log('====data',data)
+                var response = await db.addSingleAnsTypeQuestion(ExamQuestion, ExamAnswer, data)
+                if(record.length - 1 == index){
+                    res.status(201).send(response)    
+                }
+            })
+        }).catch(err => {
+            console.log("==errr", err)
+        })
+    } catch (error) {
+        console.log('Get Latest Users Error : ', error);
+        utils.handleError(res, error)
+    }
+}
+
+exports.createEmailTemplate = async (req, res) => {
+    try{
+        var data = req.body
+        const item = await db.createItem(data, EmailTemplate)
+        res.status(201).json(item)
+    }catch(error){
+        utils.handleError(res, error)
+    }
+}
+
+exports.getEmailTemplate = async (req, res) => {
+    try{
+        var data = req.body
+        const item = await db.getEmailTemplateById(data,EmailTemplate)
+        res.status(201).json(item)
+    }catch(error){
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateTemplate = async (req, res) => {
+    try{
+        var data = req.body
+        const item = await db.updateTemplate(data, EmailTemplate)
+        res.status(201).json(item)
+    }catch(error){
+        utils.handleError(res, error)
+    }
+}
+
+
+
+exports.getQualityIsOurPassion = async (req, res) => {
+    try {
+        const item = await db.getQualityIsOurPassion(HomeManagement)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get Contact Us Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+
+exports.updateQualityIsOurPassion = async (req, res) => {
+    try {
+        req = req.body
+        //console.log('req=============',req);
+        const item = await db.updateQualityIsOurPassion(req, HomeManagement)
+        res.status(201).json(item)
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+exports.updatePreparation = async (req, res) => {
+    try {
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.attachment,
+                path: _dir + 'public/HomeBanner'
+            });
+            req.body.attachment = image_name
+        }
+        console.log("Contact Us Body : ", req.body.type);
+        const edit = await db.updatePreparation(req.body.id, HomeManagement, req.body)
+        console.log("Update updatePreparation  : ", edit)
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update  updatePreparation Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+
+exports.getKeyFeatures = async (req, res) => {
+    try {
+        const item = await db.getKeyFeatures(KeyFeatures)
+        res.status(201).json({
+            data: item,
+            code: 201
+        })
+    } catch (error) {
+        console.log('Get getKeyFeatures Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+exports.updateKeyFeatures = async (req, res) => {
+    try {
+
+        var features = JSON.parse(req.body.key_feature)
+        var data = req.body
+        data.key_feature = features
+
+        if (req.files) {
+            const image_name = await imageUpload({
+                image_data: req.files.video,
+                path: _dir + 'public/key_feature_vdo'
+            });
+            data.vedio = image_name
+        }
+        // console.log("Contact Us Body : ", req.body.type);
+        const edit = await db.updateKeyFeatures(req.body.id, KeyFeatures, data)
+        console.log("Update updatePreparation  : ", edit)
+        res.status(201).json({
+            data: edit,
+            code: 200
+        });
+    } catch (error) {
+        console.log('Update  updateKeyFeatures Data By ID Error: ', error)
+        utils.handleError(res, error)
+    }
+}
+
+
+
+exports.updateFeaturedBookStatus = async (req, res) => {
+    try {
+        var data = req.body
+        //console.log('req=============',req);
+        const item = await db.updateItem(data.category_id, Bookcategory, data)
+        res.status(201).json({
+            code: 201,
+            data: item
+        })
+
+    } catch (error) {
+        console.log(';err================', error)
+        handleError(res, error)
+    }
+}
+
+
+
+exports.createGenericFaq = async (req, res) => {
+    try {
+        const addFaq = await db.createGenericFaq(req.body, GENERICFAQ);
+        res.status(201).json({
+            data: addFaq,
+            code: 200
+        });
+    } catch (e) {
+        console.log(e);
+    }
+}
+
+
+exports.getGenericFaq = async (req, res) => {
+    try {
+        const item = await db.getGenericFaq(req, GENERICFAQ)
+        res.status(201).json(item)
+    } catch (error) {
+        console.log('Get All GENERICFAQ Error: ', error);
+        utils.handleError(res, error)
+    }
+}
+// exports.updatePreparation = async (req, res) => {
+//     try {
+//         req = req.body
+//         //console.log('req=============',req);
+//         const item = await db.updatePreparation(req, HomeManagement)
+//         res.status(201).json(item)
+
+//     } catch (error) {
+//         console.log(';err================', error)
+//         handleError(res, error)
+//     }
+// }
+
+
+
+
+
+
+////////////////////////////////////////admin route.js////////////////////////
+
+const controller = require('../controllers/admin')
+const validate = require('../controllers/admin.validate')
+const AuthController = require('../controllers/auth')
+const express = require('express')
+const router = express.Router()
+require('../../config/passport')
+const passport = require('passport')
+const requireAuth = passport.authenticate('jwt', {
+	session: false
+})
+const trimRequest = require('trim-request')
+
+/*
+ * Auth routes
+ */
+
+/*
+ * Register route
+ */
+ router.post(
+ 	'/register',
+ 	trimRequest.all,
+ 	validate.register,
+ 	controller.register
+ 	)
+
+/*
+ * Verify route
+ */
+// router.post('/verify', trimRequest.all, validate.verify, controller.verify)
+
+router.get(
+	'/verify/email/:token',
+	trimRequest.all,
+  // validate.register,
+  controller.verifyEmail
+  )
+/*
+ * Get new refresh token
+ */
+ router.get(
+ 	'/token',
+ 	requireAuth,
+ 	AuthController.roleAuthorization(['user', 'admin']),
+ 	trimRequest.all,
+ 	controller.getRefreshToken
+ 	)
+
+ router.get(
+ 	'/get_all_exams',
+ 	trimRequest.all,
+ 	controller.getExams
+ 	)
+
+/*
+ * Login route
+ */
+ router.post('/login', trimRequest.all, validate.login, controller.login)
+ router.post('/create_Exam_Details', trimRequest.all, validate.validateExamDetails, controller.createExamDetails)
+ router.post('/getExam', trimRequest.all, validate.validateExam, controller.getExamDetails)
+//router.post('/getExam', trimRequest.all, validate.validateExam, controller.getExamDetails)
+router.post('/delExam', trimRequest.all, validate.validateExam, controller.deleteExam)
+router.post(
+	'/editExam',
+	validate.validateExam,
+	controller.editExam
+	)
+
+router.post(
+	'/create_faq',
+	trimRequest.all,
+	validate.createFaq,
+	controller.createFaq
+	)
+
+router.get(
+	'/getFaqs',
+	controller.getFaqs
+	)
+
+router.post(
+	'/deleteFaq',
+	validate.validatefaqs,
+	controller.deleteFaq
+	)
+
+router.post(
+	'/editFaqs',
+	validate.validatefaqs,
+	controller.editFaqs
+	)
+
+router.post(
+	'/addTestimonial',
+	validate.addTestimonial,
+	controller.addTestimonial
+	)
+
+router.get(
+	'/getTestimonial',
+	controller.getTestimonial
+	)
+
+router.post(
+	'/deleteTestimonial',
+	validate.validateTestimonial,
+	controller.deleteTestimonial
+	)
+
+router.post(
+	'/updateTestimonial',
+	validate.validateTestimonial,
+	controller.updateTestimonial
+	)
+
+router.post(
+	'/getFaqById',
+	validate.validatefaqs,
+	controller.getFaqById
+	)
+
+router.post(
+	'/getTestimonialById',
+  // validate.validateTestimonials,
+  controller.getTestimonialById
+  )
+
+router.post(
+	'/addExamQuestionAns',
+	controller.addExamQuestionAns
+	)
+
+router.get(
+	'/getExamList',
+	controller.getExamList
+	)
+
+router.post(
+	'/addBookCategory',
+	controller.addBookCategory
+	)
+
+router.post(
+	'/editBookCategory',
+	controller.editBookCategory
+	)
+
+router.post(
+	'/deleteBookCategory',
+	controller.deleteBookCategory
+	)
+
+router.post(
+	'/getBookcategoryById',
+	controller.getBookcategoryById
+	)
+router.get(
+	'/getBookCategory',
+	controller.getBookCategory
+	)
+router.post(
+	'/getExamQuestions',
+	controller.getExamQuestions
+	)
+
+router.get(
+	'/getAllBookCategory',
+	controller.getAllBookCategory
+	)
+
+router.post(
+	'/addBook',
+	controller.addBook
+	)
+
+router.post(
+	'/editBook',
+	controller.editBook
+	)
+
+router.post(
+	'/delBook',
+	controller.delBook
+	)
+
+router.post(
+	'/getBookByCategoryId',
+	controller.getBookByCategoryId
+	)
+
+router.post(
+	'/getBookById',
+	controller.getBookById
+	)
+
+router.post(
+	'/addChapter',
+	controller.addChapter
+	)
+
+router.get(
+	'/allChapter',
+	controller.allChapter
+	)
+
+router.post(
+	'/getChapterById',
+	controller.getChapterById
+	)
+
+router.post(
+	'/updateChapter',
+	controller.updateChapter
+	)
+
+router.post(
+	'/deleteChapter',
+	controller.deleteChapter
+	)
+
+router.post(
+	'/addTopics',
+	controller.addTopics
+	)
+
+router.get(
+	'/allTopic',
+	controller.allTopic
+	)
+
+router.post(
+	'/getTopicById',
+	controller.getTopicById
+	)
+
+router.post(
+	'/updateTopic',
+	controller.updateTopic
+	)
+
+router.post(
+	'/deleteTopic',
+	controller.deleteTopic
+	)
+
+router.post(
+	'/addStudyMaterial',
+	controller.addStudyMaterial
+	)
+
+router.get(
+	'/getAllStudyMaterial',
+	controller.getAllStudyMaterial
+	)
+
+router.post(
+	'/getStudyMaterialById',
+	controller.getStudyMaterialById
+	)
+
+router.post(
+	'/updateStudyMaterial',
+	controller.updateStudyMaterial
+	)
+
+router.post(
+	'/deleteStudyMaterial',
+	controller.deleteStudyMaterial
+	)
+
+router.post(
+	'/getQuestionAnswersById',
+	controller.getQuestionAnswersById
+	)
+
+router.post(
+	'/updateExamQuestionAns',
+	controller.updateExamQuestionAns
+	)
+
+router.post(
+	'/deleteQuestions',
+	controller.deleteQuestions
+	)
+
+router.post(
+	'/addHomeBanner',
+	controller.addHomeBanner
+	)
+
+router.get(
+	'/getHomeBanners',
+	controller.getHomeBanners
+	)
+
+router.post(
+	'/editHomeBanner',
+	controller.editHomeBanner
+	)
+
+router.post(
+	'/deleteHomeBanner',
+	controller.deleteHomeBanner
+	)
+
+router.post(
+	'/getHomeBannerById',
+	controller.getHomeBannerById
+	)
+router.post(
+	'/addGeneralManagement',
+	controller.addGeneralManagement
+	)
+
+router.post(
+	'/getGeneralManagement',
+	controller.getGeneralManagement
+	)
+
+router.post(
+	'/updateGeneralManagement',
+	controller.updateGeneralManagement
+	)
+
+router.post(
+	'/addHomePageContent',
+	controller.addHomePageContent
+	)
+
+router.post(
+	'/getChapterByExamId',
+	controller.getChapterByExamId
+	)
+
+router.post(
+	'/addQuestion',
+	controller.addQuestion
+	)
+
+router.post(
+	'/getQuestionsByTopicID',
+	controller.getQuestionsByTopicID
+	)
+
+router.post(
+	'/getQuestionsByID',
+	controller.getQuestionsByID
+	)
+
+router.post(
+	'/updateQuestionAnswerOfTopic',
+	controller.updateQuestionAnswerOfTopic
+	)
+
+router.post(
+	'/deleteQuestionAnswerOfTopic',
+	controller.deleteQuestionAnswerOfTopic
+	)
+
+router.post(
+	'/getFaqsByExamID',
+	controller.getFaqsByExamID
+	)
+
+router.post(
+	'/getTopicsByChapterID',
+	controller.getTopicsByChapterID
+	)
+
+router.post(
+	'/getStudyMaterialByTopicID',
+	controller.getStudyMaterialByTopicID
+	)
+
+router.post(
+	'/addFreeQues',
+	controller.addFreeQues
+	)
+
+router.post(
+	'/getFreeQuestionsByTopicID',
+	controller.getFreeQuestionsByTopicID
+	)
+
+router.post(
+	'/addCart',
+	controller.addCart
+	)
+
+router.get(
+	'/getAllCarts',
+	controller.getAllCarts
+	)
+
+router.post(
+	'/getCartById',
+	controller.getCartsById
+	)
+
+router.post(
+	'/updateCart',
+	controller.updateCart
+	)
+
+router.post(
+	'/deleteCart',
+	controller.deleteCart
+	)
+
+router.post(
+	'/admin/saveAdminProfile',
+	controller.saveAdminProfile
+	)
+
+router.get(
+	'/admin/getAdminProfileList',
+	controller.getAdminProfileList
+	)
+
+router.post(
+	'/admin/getAdminProfileById',
+	controller.getAdminProfileById
+	)
+
+router.post(
+	'/admin/updateAdminProfile',
+	controller.updateAdminProfile
+	)
+
+router.post(
+	'/admin/deleteAdminProfile',
+	controller.deleteAdminProfile
+	)
+
+router.post(
+	'/admin/adminLogin',
+	controller.adminLogin
+	)
+
+router.post(
+	'/admin/users/list',
+	controller.userListing
+	)
+
+router.post(
+	'/getUserById',
+	controller.getUserById
+	)
+
+router.post(
+	'/updateUser',
+	controller.updateUser
+	)
+
+router.post(
+	'/deleteUser',
+	controller.deleteUser
+	)
+
+router.post(
+	'/filterUser',
+	controller.filterUser
+	)
+
+router.post(
+	'/dummyCreate',
+	controller.dummyCreate
+	)
+
+router.post(
+	'/getContactUsById',
+	controller.getContactUsById
+	)
+
+router.post(
+	'/updateContactUs',
+	controller.updateContactUs
+	)
+
+router.post(
+	'/createContactUsSubject',
+	controller.createContactUsSubject
+	)
+
+router.get(
+	'/getAllContactUsSubject',
+	controller.getAllContactUsSubject
+	)
+
+router.post(
+	'/getContactUsSubjectById',
+	controller.getContactUsSubjectById
+	)
+
+router.post(
+	'/updateContactUsSubject',
+	controller.updateContactUsSubject
+	)
+
+router.post(
+	'/deleteContactUsSubject',
+	controller.deleteContactUsSubject
+	)
+
+router.post(
+	'/saveAboutUs',
+	controller.saveAboutUs
+	)
+
+router.post(
+	'/getAboutUsById',
+	controller.getAboutUsById
+	)
+
+router.post(
+	'/updateAboutUs',
+	controller.updateAboutUs
+	)
+
+router.post(
+	'/getAllSocialMedialLink',
+	controller.getAllSocialMedialLink
+	)
+
+router.post(
+	'/addSocialMediaLink',
+	controller.addSocialMediaLink
+	)
+
+router.post(
+	'/updateSocialMediaByType',
+	controller.updateSocialMediaByType
+	)
+
+router.post(
+	'/getSocialMediaLinkById',
+	controller.getSocialMediaLinkById
+	)
+
+router.post(
+	'/updateSocialMediaLinkById',
+	controller.updateSocialMediaLinkById
+	)
+
+router.post(
+	'/deleteSocialMediaLink',
+	controller.deleteSocialMediaLink
+	)
+
+router.post(
+	'/addPromoCodes',
+	controller.addPromoCodes
+	)
+
+router.post(
+	'/getAllPromoCodes',
+	controller.getAllPromoCodes
+	)
+
+router.post(
+	'/getPromoCodesById',
+	controller.getPromoCodesById
+	)
+
+router.post(
+	'/updatePromoCodeById',
+	controller.updatePromoCodeById
+	)
+
+router.post(
+	'/deletePromoCode',
+	controller.deletePromoCode
+	)
+
+router.get(
+	'/generateCSV',
+	controller.generateCSV
+	)
+
+router.post(
+	'/generatePdf',
+	controller.generatePdf
+	)
+
+router.post(
+	'/revenueGraph',
+	controller.revenueGraph
+	)
+
+router.post(
+	'/demoData',
+	controller.demoData
+	)
+
+router.post(
+	'/contactMessage',
+	controller.ContactMessages
+	)
+
+router.post(
+	'/getContactMessageById',
+	controller.getContactMessageById
+	)
+
+router.post(
+	'/replyMessage',
+	controller.replyMessage
+	)
+
+router.post(
+	'/deleteMessage',
+	controller.deleteMessage
+	)
+
+router.post(
+	'/userGraph',
+	controller.userGraph
+	)
+
+router.post(
+	'/totalCount',
+	controller.totalCount
+	)
+
+router.post(
+	'/deleteMessageById',
+	controller.deleteMessageById
+	)
+
+router.post(
+	'/getLatestUsers',
+	controller.getLatestUsers
+	)
+
+router.post(
+	'/addSingleAnsTypeQuestion',
+	controller.addSingleAnsTypeQuestion
+	)
+
+// router.post(
+// 	'/save_email_template',
+// 	controller.save_email_template
+// 	)
+
+router.post(
+	'/createEmailTemplate',
+	controller.createEmailTemplate
+	)
+
+router.post(
+	'/getEmailTemplate',
+	controller.getEmailTemplate
+	)
+
+router.post(
+	'/updateTemplate',
+	controller.updateTemplate
+	)
+
+router.get(
+	'/getQualityIsOurPassion',
+	controller.getQualityIsOurPassion
+)
+
+
+router.post(
+	'/updateQualityIsOurPassion',
+	controller.updateQualityIsOurPassion
+	)
+	
+router.post(
+	'/updatePreparation',
+	controller.updatePreparation
+			)	
+
+		router.get(
+			'/getKeyFeatures',
+			controller.getKeyFeatures
+		)	
+
+		router.post(
+			'/updateKeyFeatures',
+			controller.updateKeyFeatures
+			)
+			router.post(
+				'/updateFeaturedBookStatus',
+				controller.updateFeaturedBookStatus
+				)	
+router.post(
+	'/createGenericFaq',
+	controller.createGenericFaq
+	)
+
+	router.post(
+		'/getGenericFaq',
+		controller.getGenericFaq
+		)	
+router.post(
+	'/deleteGenericFaq',
+	controller.deleteGenericFaq
+	)		
+// router.get(
+//   '/getFaqs',
+//   controller.getFaqs
+
+// )
+// router.get(
+//   '/getUserListing',
+//   controller.getUserListing
+// )
+
+// router.get('/test1', trimRequest.all, controller.testuser)
+
+module.exports = router
+
+
+
+///////////Admin_db.js///////////////////
+
+
+const {
+    addStudyMaterial
+} = require('../controllers/admin')
+const {
+    buildSuccObject,
+    buildErrObject,
+    itemNotFound
+} = require('../middleware/utils')
+const auth = require('../middleware/auth')
+const { parse } = require('json2csv');
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
+var _dir = "/var/www/html/NurseExam_apis/"
+const ejs = require('ejs')
+const pdf = require('html-pdf')
+var fs = require('fs');
+const emailer = require('../middleware/emailer');
+/**
+ * Builds sorting
+ * @param {string} sort - field to sort from
+ * @param {number} order - order for query (1,-1)
+ */
+const buildSort = (sort, order) => {
+    const sortBy = {}
+    sortBy[sort] = order
+    return sortBy
+}
+
+/**
+ * Hack for mongoose-paginate, removes 'id' from results
+ * @param {Object} result - result object
+ */
+const cleanPaginationID = result => {
+    result.docs.map(element => delete element.id)
+    return result
+}
+
+/**
+ * Builds initial options for query
+ * @param {Object} query - query object
+ */
+const listInitOptions = async req => {
+    return new Promise(resolve => {
+        const order = req.query.order || -1
+        const sort = req.query.sort || 'createdAt'
+        const sortBy = buildSort(sort, order)
+        const page = parseInt(req.query.page, 10) || 1
+        const limit = parseInt(req.query.limit, 10) || 5
+        const options = {
+            sort: sortBy,
+            lean: true,
+            page,
+            limit
+        }
+        resolve(options)
+    })
+}
+
+
+module.exports = {
+    /**
+     * Checks the query string for filtering records
+     * query.filter should be the text to search (string)
+     * query.fields should be the fields to search into (array)
+     * @param {Object} query - query object
+     */
+    async checkQueryString(query) {
+        return new Promise((resolve, reject) => {
+            try {
+                if (
+                    typeof query.filter !== 'undefined' &&
+                    typeof query.fields !== 'undefined'
+                ) {
+                    const data = {
+                        $or: []
+                    }
+                    const array = []
+                    // Takes fields param and builds an array by splitting with ','
+                    const arrayFields = query.fields.split(',')
+                    // Adds SQL Like %word% with regex
+                    arrayFields.map(item => {
+                        array.push({
+                            [item]: {
+                                $regex: new RegExp(query.filter, 'i')
+                            }
+                        })
+                    })
+                    // Puts array result in data
+                    data.$or = array
+                    resolve(data)
+                } else {
+                    resolve({})
+                }
+            } catch (err) {
+                console.log(err.message)
+                reject(buildErrObject(422, 'ERROR_WITH_FILTER'))
+            }
+        })
+    },
+
+
+    async getAllExams(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+            //   model.find({}, (err, item) => {
+            //   itemNotFound(err, item, reject, 'NOT_FOUND')
+            //   resolve(item)
+            // })
+
+        })
+    },
+
+    async getAllItemsWithPagination(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+            //   model.find({}, (err, item) => {
+            //   itemNotFound(err, item, reject, 'NOT_FOUND')
+            //   resolve(item)
+            // })
+
+        })
+    },
+    /**
+     * Gets items from database
+     * @param {Object} req - request object
+     * @param {Object} query - query object
+     */
+    async getItems(req, model, query) {
+        const options = await listInitOptions(req)
+        return new Promise((resolve, reject) => {
+            model.paginate(query, options, (err, items) => {
+                if (err) {
+                    reject(buildErrObject(422, err.message))
+                }
+                resolve(cleanPaginationID(items))
+            })
+        })
+    },
+
+    async getAllItems(model) {
+        return new Promise((resolve, reject) => {
+            model.find().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            })
+        })
+    },
+    /**
+     * Gets item from database by id
+     * @param {string} id - item id
+     */
+    async getItem(id, model) {
+        return new Promise((resolve, reject) => {
+            model.findById(id, (err, item) => {
+                itemNotFound(err, item, reject, 'NOT_FOUND')
+                resolve(item)
+            })
+        })
+    },
+
+    /**
+     * Creates a new item in database
+     * @param {Object} req - request object
+     */
+    async createItem(req, model) {
+        return new Promise((resolve, reject) => {
+            model.create(req, (err, item) => {
+                if (err) {
+                    reject(buildErrObject(422, err.message))
+                }
+                resolve(item)
+            })
+        })
+    },
+
+    /**
+     * Updates an item in database by id
+     * @param {string} id - item id
+     * @param {Object} req - request object
+     */
+    async updateItem(id, model, req) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndUpdate(
+                id,
+                req, {
+                    new: true,
+                    runValidators: true
+                },
+                (err, item) => {
+                    itemNotFound(err, item, reject, 'NOT_FOUND')
+                    resolve(item)
+                }
+            )
+        })
+    },
+
+    /**
+     * Deletes an item from database by id
+     * @param {string} id - id of item
+     */
+    async deleteItem(id, model) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndRemove(id, (err, item) => {
+                itemNotFound(err, item, reject, 'NOT_FOUND')
+                resolve(buildSuccObject('DELETED'))
+            })
+        })
+    },
+
+    async addExam(req, model) {
+        return new Promise((resolve, reject) => {
+            const exam = new model({
+                state_name: req.state_name,
+            })
+            exam.save((err, item) => {
+                if (err) {
+                    reject(buildErrObject(422, err.message))
+                }
+                resolve(item)
+            })
+        })
+    },
+
+    async getExamsAndStates(Exam, State) {
+        return new Promise(async (resolve, reject) => {
+            var exams = await Exam.find({}).exec();
+            var states = await State.find({}).exec();
+            resolve({
+                code: 200,
+                exams: exams,
+                states: states
+            })
+        })
+    },
+
+    async editExam(model, body) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndUpdate({
+                id: body.id,
+                $set: {
+                    exam_name: body.exam_name
+                }
+            }).then(data => {
+                resolve({
+                    code: 200,
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getFaqs(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getTestimonial(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async addExamQuestionAns(exam_model, ans_model, body) {
+        return new Promise((resolve, reject) => {
+            body.questionArr.forEach(async (element, index) => {
+                const ques = await new exam_model({
+                    question: element.question,
+                    exam_id: body.exam_id
+                })
+                await ques.save(async (err, item) => {
+                    console.log("questions", item)
+                    if (err) {
+                        reject(buildErrObject(422, err.message))
+                    }
+                    await element.ans.forEach(async (ans_ele, ind) => {
+                        const ans = await new ans_model({
+                            question_id: item.id,
+                            exam_id: body.exam_id,
+                            answer: ans_ele.ans,
+                            correct_answer: ans_ele.correct_answer
+                        })
+                        ans.save((err, item) => {
+                            if (err) {
+                                reject(buildErrObject(422, err.message))
+                            }
+                        })
+                    })
+                })
+                if (body.questionArr.length - 1 == index) {
+                    resolve({
+                        code: 200
+                    })
+                }
+            })
+        }).catch(err => {
+            console.log(err)
+            reject(buildErrObject(422, err.message))
+        })
+    },
+
+    async getExamQuestions(body, model) {
+        return new Promise((resolve, reject) => {
+            model.find({
+                exam_id: body.exam_id
+            }).populate({
+                path: 'answers',
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getBookCategory(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getBookByCategoryId(body, model) {
+        return new Promise((resolve, reject) => {
+            model.find({
+                book_category_id: body.book_category_id
+            }).populate('book_category_id').then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getAllChapter(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    getChapterByExamId(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find({
+                exam_id: req.body.exam_id
+            }).sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+
+    async getAllTopic(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getAllStudyMaterial(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getQuestionAnswersById(body, model) {
+        return new Promise((resolve, reject) => {
+            model.find({
+                _id: body.id
+            }).populate('answers').then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async updateExamQuestionAns(exam_model, ans_model, body) {
+        return new Promise((resolve, reject) => {
+            body.questionArr.forEach(async (element, index) => {
+                // const ques = await new exam_model({
+                //   question: element.question,
+                //   exam_id: body.exam_id
+                // })
+
+                exam_model.updateOne({
+                    _id: element.question_id
+
+                }, {
+                    $set: {
+                        question: element.question,
+                    }
+                }).then(update => console.log(update)).catch(err => console.log(err))
+
+                element.ans.forEach((val, ind) => {
+                    if (val) {
+                        ans_model.updateOne({
+                            _id: val._id
+                        }, {
+                            $set: {
+                                answer: val.ans,
+                            }
+                        }).then(update => console.log(update)).catch(err => console.log(err))
+                    } else {
+                        ans_model({
+                            _id: val._id
+                        }, {
+                            $set: {
+                                answer: val.ans,
+                            }
+                        }).save().then(update => console.log(update)).catch(err => console.log(err))
+                    }
+
+
+                })
+
+                resolve(true)
+
+            })
+        }).catch(err => {
+            console.log(err)
+            reject(buildErrObject(422, err.message))
+        })
+    },
+
+    async getGeneralManagement(body, model) {
+        return new Promise((resolve, reject) => {
+            model.findOne({
+                type: body.type
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async updateGeneralManagement(body, model) {
+        return new Promise((resolve, reject) => {
+            model.updateOne({
+                type: body.type
+            }, {
+                $set: {
+                    content: body.content
+                }
+            }).then(update => {
+                resolve({
+                    code: 200,
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async addHomePageContent(body, model) {
+        return new Promise((resolve, reject) => {
+            console.log("body",body)
+            var obj
+            if (body.type == "quality") {
+                obj = {
+                    type: "quality",
+                    heading: body.heading,
+                    description: body.description
+                }
+            } else if (body.type == "key_features") {
+
+                obj = {
+                    type: "key_features",
+                    heading: body.heading,
+                    features: body.features,
+                    attachment: body.attachment,
+                    attachment_type: "video"
+                }
+
+            } else if (body.type == "preparation") {
+
+                obj = {
+                    type: "preparation",
+                    heading: body.heading,
+                    description: body.description,
+                    attachment: body.attachment,
+                    attachment_type: "image"
+                }
+
+            } else if (body.type == "choose_us") {
+                obj = {
+                    type: "choose_us",
+                    heading: body.heading,
+                    description: body.description
+                }
+            }
+
+            const create = new model(obj)
+            create.save().then(created => {
+                resolve({
+                    code: 200
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async addQuestionAnswerOfExam(question_model, answer_model, body){
+        return new Promise(async (resolve, reject) => {
+            let ans_arr = []
+            
+            if(body.answerArray){
+                 ans_arr = JSON.parse(body.answerArray)
+            }
+            
+            console.log("--anss--",ans_arr)
+            const examQuestion = await new question_model({
+                question: body.question,
+                exam_id: body.exam_id,
+                topic_id: body.topic_id,
+                answer_type: body.answer_type,
+                answer_description: body.answer_description,
+                question_type: body.question_type
+            })
+            await examQuestion.save(async(err, item) => {
+                console.log("Question: ", item)
+                if(err){
+                    reject(buildErrObject(422, err.message))
+                }
+                if(ans_arr.length > 0){
+
+                await ans_arr.forEach(async(answer_ele, ind) => {
+                    const questionAnswer = await new answer_model({
+                        question_id: item._id,
+                        exam_id: body.exam_id,
+                        topic_id: body.topic_id,
+                        answer_type: body.answer_type,
+                        answer: answer_ele.answer,
+                        //appropriate_steps: JSON.parse(body.appropriate_steps),
+                        correct_answer: answer_ele.correct_answer
+                    })
+                    questionAnswer.save(async(answer_err, answer_item) => {
+                        console.log("Answer : ", answer_item)
+                        if(answer_err){
+                            reject(buildErrObject(422, answer_err.message))
+                        }
+
+                        if(ans_arr.length - 1 == ind){
+                            resolve({
+                                code: 200
+                            })
+                        }
+                    })
+                }) }else{
+                    let appro_steps = []
+                    let fillUps = []
+                    let fillUpsOptions = []
+                    let finding = []
+                    let correctFinding = []
+                    if(body.appropriate_steps){
+                        appro_steps = JSON.parse(body.appropriate_steps)
+                    }
+                    if(body.fill_ups){
+                        fillUps = JSON.parse(body.fill_ups)
+                        fillUpsOptions = JSON.parse(body.fillups_options)
+                    }
+                    if(body.findingArray){
+                        finding = JSON.parse(body.findingArray)
+                        correctFinding = JSON.parse(body.findingAnswers)
+                    }
+                    console.log("Fill Ups in Node : ", body.fill_ups)
+                    const questionAnswer = await new answer_model({
+                        question_id: item._id,
+                        exam_id: body.exam_id,
+                        topic_id: body.topic_id,
+                        answer_type: body.answer_type,
+                        appropriate_steps: appro_steps,
+                        fill_ups : fillUps,
+                        fillups_options : fillUpsOptions,
+                        finding_assessment : finding,
+                        correct_finding : correctFinding,
+                        correct_answer: true
+                    })
+                    questionAnswer.save(async(answer_err, answer_item) => {
+                        console.log("Answer : ", answer_item)
+                        resolve({
+                            code: 200
+                        })
+                        if(answer_err){
+                            reject(buildErrObject(422, answer_err.message))
+                        }
+                    })
+                }
+            })
+        })
+    },
+
+    async getQuestionsByTopicID(req, model){
+        return new Promise((resolve, reject) => {
+            model.find({
+                topic_id: req.body.topic_id
+            }).sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).populate('answer').then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            })
+        })
+    },
+
+    async getQuestionsByID (body, model){
+        return new Promise((resolve, reject) => {
+            model.findOne({
+                _id: body.id
+            }).populate('answer').then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async updateQuestionAnswerOfTopic(question_model, answer_model, body){
+        return new Promise((resolve, reject) => {
+            let ans_arr = []
+            console.log("body",body)
+            if(body.answerArray){
+                 ans_arr = JSON.parse(body.answerArray)
+            }
+            question_model.updateOne({
+                 _id: body.que_id
+            },{
+                $set : {
+                    question: body.question,
+                    exam_id: body.exam_id,
+                    topic_id: body.topic_id,
+                    answer_type: body.answer_type,
+                    answer_description: body.answer_description,
+                    question_type: body.question_type
+                }
+            }).then(update => console.log(update)).catch(err => console.log(err))
+            if(ans_arr.length > 0){
+
+            
+            ans_arr.forEach(async(answer_ele, ind) => {
+                if(answer_ele){
+                    answer_model.updateOne({
+                        _id : answer_ele._id
+                    },{
+                        $set : {
+                            exam_id: body.exam_id,
+                            topic_id: answer_ele.topic_id,
+                            answer_type: answer_ele.answer_type,
+                            answer: answer_ele.answer,
+                            correct_answer: answer_ele.correct_answer
+                        }
+                    }).then(update => console.log(update)).catch(err => console.log(err))
+                }
+            })
+        }else{
+                let appro_steps = []
+                let fillUps = []
+                let fillUpsOptions = []
+                let finding = []
+                let correctFinding = []
+                if(body.appropriate_steps){
+                    appro_steps = JSON.parse(body.appropriate_steps)
+                }
+                if(body.fill_ups){
+                    fillUps = JSON.parse(body.fill_ups)
+                    fillUpsOptions = JSON.parse(body.fillups_options)
+                }
+                if(body.findingArray){
+                    finding = JSON.parse(body.findingArray)
+                    correctFinding = JSON.parse(body.findingAnswers)
+                }
+            console.log("elseeee====")
+            answer_model.findOneAndUpdate({
+                question_id : body.que_id
+            },{
+                $set: { 
+                        appropriate_steps: appro_steps,
+                        fill_ups : fillUps,
+                        fillups_options : fillUpsOptions,
+                        finding_assessment : finding,
+                        correct_finding : correctFinding
+                     }
+
+            },{ new: true }).then(update => console.log("=====",update)).catch(err => console.log(err))
+        }
+            resolve(true)
+        }).catch(err => {
+            console.log(err)
+            reject(buildErrObject(422, err.message))
+        })
+    },
+
+    getFaqsByExamID (req, model){
+        return new Promise((resolve, reject) => {
+            model.find({
+                exam_id :  req.body.exam_id
+            }).sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    getTopicsByChapterID (req, model){
+        return new Promise((resolve, reject) => {
+            model.find({
+                chapter_id : req.body.chapter_id
+            }).sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    getStudyMaterialByTopicID (req, model){
+        return new Promise((resolve, reject) => {
+            model.find({
+                topic_id : req.body.topic_id
+            }).sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getAllCarts (req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getAdminProfile(model){
+    	return new Promise((resolve, reject) => {
+            model.findOne().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async adminLogin(req, model){
+    	return new Promise((resolve, reject) => {
+			model.findOne({
+				email: req.email
+			}).then(async data => {
+				if(data){
+					var password = req.password
+					const isPasswordMatch = await auth.checkPassword(password, data)
+					if(!isPasswordMatch){
+						reject(buildErrObject(401, 'PASSWORD_DOES_NOT_MATCH'))
+					}else{
+						resolve({
+						code: 200,
+						data: data
+						})
+					}	
+				}else{
+					reject(buildErrObject(401, 'EMAIL_DOES_NOT_EXIST'))
+				}	
+			}).catch(e => {
+				console.log(e)
+			})
+    	})
+    },
+
+    async userListing (req, model){
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).populate({
+                path : "puchasedPlan",
+                populate :{
+                    path : "exam_id"
+                }
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getUserById (req, model){
+        return new Promise((resolve, reject) => {
+            model.findById({
+                _id : req.id
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+    
+    async filterUser (req, model){
+        return new Promise((resolve, reject) => {
+            console.log("Inner: ", req.search)
+            model.find({
+                $or: [
+                    {
+                    	first_name:{
+                       		$regex: '^' + req.search + '.*',
+                       		$options: 'i'
+                   		} 
+                   	},
+                    {
+                    	email: {
+                       		$regex: '^' + req.search + '.*',
+                       		$options: 'i'
+                   		}
+               		},
+                    {
+                    	mobile_number: {
+                       		$regex: '^' + req.search + '.*',
+                       		$options: 'i'
+                   		}
+                   	},
+                    {	
+                    	zipcode: {
+                       		$regex: '^' + req.search + '.*',
+                       		$options: 'i'
+               			}
+               		},
+                    {
+                    	status: {
+                       		$regex: '^' + req.search + '.*',
+                       		$options: 'i'
+                   		}
+               		}
+                ]
+            }).populate({
+                path : "puchasedPlan",
+                populate :{
+                    path : "exam_id"
+                }
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getContactUsById(model){
+        return new Promise((resolve, reject) => {
+            model.findOne().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getAllContactUsSubject(req, model){
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getContactUsSubjectById (req, model){
+        return new Promise((resolve, reject) => {
+            model.findById({
+                _id: req.id
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async saveAboutUs (body, model){
+        return new Promise((resolve, reject) => {
+            const about = new model({
+                banner_image: body.banner_image,
+                banner_image_description: body.banner_image_description,
+                content_heading: body.content_heading,
+                content: body.content,
+                link: body.link,
+                image_one: body.image_one,
+                image_one_text: body.image_one_text,
+                image_two: body.image_two,
+                image_two_text: body.image_two_text,
+                image_three : body.image_three,
+                image_three_text: body.image_three_text,
+                heading: body.heading,
+                icon_image_one: body.icon_image_one,
+                icon_image_one_text: body.icon_image_one_text,
+                icon_image_two: body.icon_image_two,
+                icon_image_two_text: body.icon_image_two_text,
+                icon_image_three: body.icon_image_three,
+                icon_image_three_text: body.icon_image_three_text
+            })
+
+            about.save((err, item) => {
+                if (err) {
+                    reject(buildErrObject(422, err.message))
+                }
+                resolve(item)
+            })
+        })
+    },
+
+    async getAboutUsById(model){
+        return new Promise((resolve, reject) => {
+            model.findOne().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getAllSocialMedialLink(req, model){
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    updateSocialMediaByType(body, model){
+        return new Promise((resolve, reject) => {
+            model.findOne({
+                social_media_type: body.social_media_type
+            }).then(exist => {
+                if(exist){
+                    exist.update({
+                        social_media_link: body.social_media_link
+                    }).then(update => {
+                        resolve(true)
+                    }).catch(err => {
+                        console.log(err)
+                        reject(buildErrObject(422, err.message))
+                    })
+                }else{
+                    var obj = {
+                        social_media_link: body.social_media_link,
+                        social_media_type: body.social_media_type
+                    }
+                    const create = new model(obj)
+                    create.save().then(save => {
+                        resolve(true)
+                    }).catch(err => {
+                        console.log(err)
+                        reject(buildErrObject(422, err.message))
+                    })
+                }
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+            // if(body.social_media_type == 'Facebook'){
+            //     model.updateOne({
+            //         social_media_type: body.social_media_type
+            //     },{
+            //         $set: {
+            //             social_media_link: body.social_media_link
+            //         }
+            //     }).then(update => console.log(update)).catch(err => console.log(err))
+            // }else if(body.social_media_type == 'Twitter'){
+            //     model.updateOne({
+            //         social_media_type: body.social_media_type
+            //     },{
+            //         $set: {
+            //             social_media_link: body.social_media_link
+            //         }
+            //     }).then(update => console.log(update)).catch(err => console.log(err))
+            // }else if(body.social_media_type == 'Youtube'){
+            //     model.updateOne({
+            //         social_media_type: body.social_media_type
+            //     },{
+            //         $set: {
+            //             social_media_link: body.social_media_link
+            //         }
+            //     }).then(update => console.log(update)).catch(err => console.log(err))
+            // }else if(body.social_media_type == 'Instagram'){
+            //     model.updateOne({
+            //         social_media_type: body.social_media_type
+            //     },{
+            //         $set: {
+            //             social_media_link: body.social_media_link
+            //         }
+            //     }).then(update => console.log(update)).catch(err => console.log(err))
+            // }else if(body.social_media_type == 'LinkedIn'){
+            //     model.updateOne({
+            //         social_media_type: body.social_media_type
+            //     },{
+            //         $set: {
+            //             social_media_link: body.social_media_link
+            //         }
+            //     }).then(update => console.log(update)).catch(err => console.log(err))
+            // }
+        }).catch(err => {
+            console.log(err)
+            reject(buildErrObject(422, err.message))
+        })
+    },
+
+    async getSocialMediaLinkById (body, model){
+        return new Promise((resolve, reject) => {
+            model.findById({
+                _id: body.id
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async getAllPromoCodes(req, model){
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getPromoCodesById(body, model){
+        return new Promise((resolve, reject) => {
+            model.findById({
+                _id: body.id
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async generateCSVFile(model){
+    	return new Promise((resolve, reject) => {
+    		model.find({},'_id first_name exam_id email mobile_number zipcode puchasedPlan createdAt').populate({
+    			path : "puchasedPlan",
+                populate :{
+                    path : "exam_id"
+                }}).populate('topic_id').then(data => {
+   				csvData = []
+
+   				data.forEach(element => {
+   					var str = ''
+   					//console.log("====",element.puchasedPlan)
+   					element.puchasedPlan.map((x) => {
+   						str += x.exam_id ? x.exam_id.examName + "," :'--'+ ","
+   					})
+   					
+   					csvData.push({
+   						_id : element._id,
+						first_name : element.first_name,
+						examName : str,
+						email : element.email,
+						mobile_number : element.mobile_number,
+						zipcode : element.zipcode,
+						createdAt : element.createdAt
+   					})
+
+   				})
+
+   				var fileName = Date.now()+'.csv';
+    			const csvWriter = createCsvWriter({
+				  path: _dir + 'public/CSVFiles/'+fileName,
+				  header: [
+				    {id: '_id', title: 'ID'},
+				    {id: 'first_name', title: 'Name'},
+				    {id: 'examName', title: 'Exam'},
+				    {id: 'email', title: 'Email'},
+				    {id: 'mobile_number', title: 'Mobile Number'},
+				    {id: 'zipcode', title: 'ZipCode'},
+				    {id: 'createdAt', title: 'Register At'}
+				  ]
+				});
+    			csvWriter.writeRecords(csvData).then(()=> console.log('The CSV file was written successfully'));
+    			resolve({
+                    code: 200,
+                    data: data,
+                    fileName : fileName,
+    			})
+    		}).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+    	})
+    },
+
+    async generatePdf(body, model){
+        return new Promise((resolve, reject) => {
+            model.find({
+                topic_id : body.topic_id
+            }, '_id question question_type answer_type answer correct_answer').populate('answer').then(data => {
+                csvData = []
+                data.forEach(element => {
+                    var ansStr = ''
+                    var correctAnsStr = ''
+                    element.answer.map((x) => {
+                        ansStr += x.answer ? x.answer + "," : '--' + ','
+
+                        if(x.answer_type == 'Yes_No'){
+                            if(x.correct_answer == false){
+                                correctAnsStr += x.correct_answer ? x.correct_answer + "," : '--' + ','
+                            }
+                        }else{   
+                            if(x.correct_answer == true){
+                                correctAnsStr += x.answer ? x.answer + "," : '--' + ','
+                            }
+                        }
+                    })
+
+                    csvData.push({
+                        _id : element._id,
+                        question : element.question,
+                        question_type : element.question_type,
+                        answer_type : element.answer_type,
+                        answer : ansStr,
+                        correct_answer : correctAnsStr
+                    })
+                })
+                var fileName = Date.now()+'.csv';
+                const csvWriter = createCsvWriter({
+                  path: _dir + 'public/PdfFiles/'+fileName,
+                  header: [
+                    {id: '_id', title: 'ID'},
+                    {id: 'question', title: 'Question'},
+                    {id: 'question_type', title: 'Question Type'},
+                    {id: 'answer_type', title: 'Answer Type'},
+                    {id: 'answer', title: 'Answer'},
+                    {id: 'correct_answer', title: 'Correct Answer'}
+                  ]
+                });
+                csvWriter.writeRecords(csvData).then(()=> console.log('The CSV file was written successfully'));
+                resolve({
+                    code: 200,
+                    data: data,
+                    fileName : fileName,
+                })
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async pdfGenerate(body, model,allData){
+        return new Promise((resolve, reject) => {
+            model.find({
+                exam_id : body.exam_id
+            }, '_id question question_type answer_type answer correct_answer exam_id answer_description').populate({
+                path: "answer",
+                populate :[{
+                    path : "exam_id" 
+                },
+                {
+                    path : "topic_id",
+                    populate: {
+                        path: "chapter_id"
+                    }
+                }]
+            }).populate('exam_id').populate('topic_id').then(async data => {
+                csvData = []
+                console.log('====data==',data)
+                data.forEach(element => {
+                    var ansStr = []
+                    var correctAnsStr = ''
+                    element.answer.map((x) => {
+                        ansStr += x.answer ? x.answer + "," : '--' + ','
+
+                        if(x.answer_type == 'Yes_No'){
+                            if(x.correct_answer == false){
+                                correctAnsStr += x.correct_answer ? x.correct_answer + "," : '--' + ','
+                            }
+                        }else{   
+                            if(x.correct_answer == true){
+                                correctAnsStr += x.answer ? x.answer + "," : '--' + ','
+                            }
+                        }
+                    })
+
+                    csvData.push({
+                        _id : element._id,
+                        question : element.question,
+                        question_type : element.question_type,
+                        answer_type : element.answer_type,
+                        answer : element.answer,
+                        correct_answer : element.correct_answer,
+                        answer_description : element.answer_description,
+                        topic_id : element.topic_id
+                    })
+                })
+
+
+                var obj = {
+                    csvData: csvData,
+                    allData: allData
+                }
+                console.log("===obj",obj)
+                var fileName = Date.now()+'.pdf';
+                var contents = await fs.readFileSync('./views/exam_pdf.ejs', 'utf8');
+                var html = await ejs.render(contents, obj);
+                var options = {
+                    format: 'A4',
+                    "width": "12in",
+                    "orientation": "landscape",
+                    "height": "15in"
+                };
+                await pdf.create(html, options).toFile(_dir + '/public/PdfFiles-pdf/' + fileName, function(err, pdfV) {
+                    if (err) return console.log(err);
+                    console.log("filename: ===", pdfV); // { filename: '/app/businesscard.pdf' }
+                    
+                    resolve({
+                        code: 200,
+                        data: data,
+                        allData:allData,
+                        fileName : fileName,
+                })
+            })
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+        })
+    })
+    },
+
+    async getData(body, model){
+        return new Promise((resolve, reject) => {
+            model.findOne({
+                exam_id: body.exam_id
+            }).populate('exam_id').then(data => {
+                resolve(data)
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async revenueGraph(body,model){
+        return new Promise((resolve, reject) => {
+            model.aggregate(
+                [
+                    {
+                        "$group":{
+                            "_id": {month: {$month:"$createdAt"}},
+                            "total": {"$sum": "$amount"},
+                            "createdAt" : {
+                                "$first" : "$createdAt"
+                            }
+                        }
+                    }
+                ]
+            ).then(data => {
+                resolve(data)
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async dataDemo(body,topicModel,examModel){
+        return new Promise((resolve, reject) => {
+            topicArray = [];
+            topicModel.find({
+                exam_id: body.exam_id
+            }).then(data => {
+                console.log("Topic Data: ",data);
+                data.forEach(element => {
+                    topicArray.push(element._id)    
+                })
+                console.log("All Topic ID Array: ",topicArray)
+                examModel.find({
+                    exam_id: body.exam_id,
+                    topic_id:  { $in: topicArray }
+                }).then(data => {
+                    console.log("Data: ", data)
+                    resolve(data)
+                }).catch(e => {
+                    console.log(e)
+                    reject(buildErrObject(422, e.message))
+                })
+
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async getContactMessages(req, model) {
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).populate('subject').skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async getContactMessageById(body, model){
+    	return new Promise((resolve, reject) => {
+            model.findById({
+                _id: body.id
+            }).populate('subject').then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async replyMessage(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.updateOne({
+    			_id : body.id
+    		},{
+    			$set: {
+    				name: body.name,
+    				email: body.email,
+    				reply: body.reply
+    			}
+    		}).then(async user => {
+    			console.log("Reply message: ",user)
+    			resolve({
+                    code: 200,
+                    data: user
+                })
+             await emailer.sendReplyEmail('en',body)
+    		}).catch(err => {
+    			console.log(err)
+                reject(buildErrObject(422, err.message))
+    		})
+    	})
+    },
+
+    async deleteMessage(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.deleteMany({
+    			_id: { $in: body.id }
+    		}).then(data => {
+                console.log("Data: ", data)
+                resolve(data)
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+    	})
+    },
+
+    async userGraph(body,model){
+        return new Promise((resolve, reject) => {
+            model.aggregate(
+                [
+                    {
+                        "$group":{
+                            "_id": {month: {$month:"$createdAt"}},
+                            "myCount": {$sum: 1},
+                            "createdAt" : {
+                                "$first" : "$createdAt"
+                            }
+                        }
+                    }
+                ]
+            ).then(data => {
+                resolve(data)
+            }).catch(e => {
+                console.log(e)
+                reject(buildErrObject(422, e.message))
+            })
+        })
+    },
+
+    async userCount(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.countDocuments({}).then(userCount => {
+                resolve(userCount)
+            }).catch(userError => {
+                console.log(userError)
+                reject(buildErrObject(422, userError.message))
+            })
+    	})
+    },
+
+    async totalEarning(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.aggregate(
+            	[
+            		{
+            			"$group": {
+            				_id : "$earning",
+            				"earning": {"$sum": "$amount"}
+            			}
+            		}
+            	]
+            ).then(payCount => {
+                resolve(payCount)
+            }).catch(payError => {
+                console.log(payError)
+                reject(buildErrObject(422, payError.message))
+            })
+    	})
+    },
+
+    async chapterCount(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.aggregate(
+            	[
+            		{
+            			"$group": {
+            				_id : "$chapterCount",
+            				"chapterCount": {$sum: 1}
+            			}
+            		}
+            	]
+            ).then(chapterCount => {
+                resolve(chapterCount)
+            }).catch(chapterError => {
+                console.log(chapterError)
+                reject(buildErrObject(422, chapterError.message))
+            })
+    	})
+    },
+
+    async paidQuestionCount(body, model){
+    	return new Promise((resolve, reject) => {
+    		model.aggregate(
+            	[
+            		{
+            			"$group": {
+            				_id: "$question_type",
+            				"paidQuestionCount": {$sum: 1}
+            			}
+            			
+
+            		}
+            	]
+            ).then(paidQuestionCount => {
+                resolve(paidQuestionCount)
+            }).catch(paidQuestionError => {
+                console.log(paidQuestionError)
+                reject(buildErrObject(422, paidQuestionError.message))
+            })
+    	})
+    },
+
+    // async freeQuestionCount(body, model){
+    // 	return new Promise((resolve, reject) => {
+    // 		model.aggregate(
+    //         	[
+    //         		{
+    //         			"$group": {
+    //         				"freeQuestionCount": {$sum: 1}
+    //         			},
+    //         			"$match": {
+    //         				question_type: "Free"
+    //         			}
+
+    //         		}
+    //         	]
+    //         ).then(freeQuestionCount => {
+    //             resolve(freeQuestionCount)
+    //         }).catch(freeQuestionError => {
+    //             console.log(freeQuestionError)
+    //             reject(buildErrObject(422, freeQuestionError.message))
+    //         })
+    // 	})
+    // },
+
+    async getLatestUsers(body, model){
+        return new Promise((resolve, reject) => {
+            model.find().populate({ path : "puchasedPlan",
+                populate :{
+                    path : "exam_id"
+                }}).sort({
+                _id: -1
+            }).limit(10).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async addPromoCodes(body, model){
+        return new Promise((resolve, reject) => {
+            model.findOne({
+                promo_code : body.promo_code
+            }).then(data => {
+                if(data){
+                    reject(buildErrObject(404, "This Promo Code is already exists!"))
+                }else{
+                    var obj = new model({
+                        promo_code : body.promo_code,
+                        discount : body.discount
+                    })
+
+                    obj.save().then(data=> {
+                        resolve({
+                            code: 200,
+                            data: data
+                        })  
+                    }).catch(err => {
+                        console.log(err)
+                        reject(buildErrObject(422, err.message))
+                    })
+                }
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+       })
+    },
+
+    async ansObj(data){
+        return new Promise(async (resolve, reject) => {
+            var correct = []
+            await data.correct_ans.forEach(ele => {
+                correct.push(ele.trim())
+            })
+            var ans = []
+            await data.answerArray.forEach(async (ele, ind)=>{
+                console.log(data.correct_ans , ele.trim())
+                var obj = {
+                    answer: ele,
+                    correct_answer: correct.includes(ele.trim())
+                }
+                await ans.push(obj)
+                if(data.answerArray.length - 1 == ind){
+                    resolve(ans)
+                }
+            })
+       })
+    },
+
+    async addSingleAnsTypeQuestion(question_model, answer_model, body){
+        return new Promise(async (resolve, reject) => {
+            let ans_arr = body.answer
+            const examQuestion = await new question_model({
+                question: body.question,
+                exam_id: body.exam_id,
+                topic_id: body.topic_id,
+                answer_type: body.answer_type,
+                answer_description: body.answer_description,
+                // question_type: body.question_type
+            })
+            await examQuestion.save(async(err, item) => {
+             //   console.log("Question: ", item)
+                if(err){
+                    reject(buildErrObject(422, err.message))
+                }
+                if(ans_arr.length > 0){
+                    var correct_arr =  body.correct_ans
+                    await ans_arr.forEach(async(answer_ele, ind) => {
+                        var obj = {
+                            question_id: item._id,
+                            exam_id: body.exam_id,
+                            topic_id: body.topic_id,
+                            answer_type: body.answer_type,
+                            answer: answer_ele.answer,
+                            correct_answer: answer_ele.correct_answer,
+                            answer_ele : body.correct_ans,
+                        }                       
+                        console.log("Obj->",  obj);
+
+                        const questionAnswer = await new answer_model(obj)
+                        await questionAnswer.save().then(saved => {
+                            if(ans_arr.length - 1 == ind){
+                                resolve({
+                                    code: 200
+                                })
+                            }
+                        }).catch(err => {
+                            console.log(err)
+                            reject(buildErrObject(422, err.message))
+                        })
+                    }) 
+                }
+            })
+        })
+    },
+    
+
+    async getEmailTemplateById(body,model){
+        return new Promise((resolve,reject) => {
+            model.findOne({
+                type: body.type
+            }).then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+
+    async updateTemplate(body, model){
+        return new Promise((resolve, reject) => {
+           model.findOne({
+            type : body.type
+           }).then(exist => {
+                if(exist){
+                    exist.update({
+                        content :  body.content
+                    }).then(updated => {
+                        resolve({
+                            code: 200,
+                            data: updated
+                        })
+                    }).catch(err => {
+                        console.log(err)
+                        reject(buildErrObject(422, err.message))
+                    })
+                }else{
+                    var obj = {
+                        content : body.content,
+                        type: body.type
+                    }
+
+                    const create = new model(obj)
+                    create.save().then(save => {
+                        resolve({
+                            code: 200,
+                            data: save
+                        })
+                    }).catch(err => {
+                        console.log(err)
+                        reject(buildErrObject(422, err.message))
+                    })
+                }
+           }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+    
+    
+    async getQualityIsOurPassion(model){
+        return new Promise((resolve, reject) => {
+            model.find().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async updateQualityIsOurPassion(body, model) {
+        return new Promise((resolve, reject) => {
+            model.updateOne({
+                type: body.type
+            }, {
+                $set: {
+                    heading: body.heading,
+                    description:body.description
+                }
+            }).then(update => {
+                resolve({
+                    code: 200,
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+
+    async updatePreparation(id, model, req) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndUpdate(
+                id,
+                req, {
+                    new: true,
+                    runValidators: true
+                },
+                (err, item) => {
+                    itemNotFound(err, item, reject, 'NOT_FOUND')
+                    resolve(item)
+                }
+            )
+        })
+    },
+
+    async getKeyFeatures(model){
+        return new Promise((resolve, reject) => {
+            model.find().then(data => {
+                resolve({
+                    code: 200,
+                    data: data
+                })
+            }).catch(e => {
+                console.log(e)
+            })
+        })
+    },
+    async updateKeyFeatures(id, model, req) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndUpdate(
+                id,
+                req, {
+                    new: true,
+                    runValidators: true
+                },
+                (err, item) => {
+                    itemNotFound(err, item, reject, 'NOT_FOUND')
+                    resolve(item)
+                }
+            )
+        })
+    },
+
+    async updateFeaturedBookStatus(id, model, req) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndUpdate(
+                id,
+                req, {
+                    new: true,
+                    runValidators: true
+                },
+                (err, item) => {
+                    itemNotFound(err, item, reject, 'NOT_FOUND')
+                    resolve(item)
+                }
+            )
+        })
+    },
+
+    async createGenericFaq(req, model) {
+        return new Promise((resolve, reject) => {
+            model.create(req, (err, item) => {
+                if (err) {
+                    reject(buildErrObject(422, err.message))
+                }
+                resolve(item)
+            })
+        })
+    },
+
+    async getGenericFaq(req, model){
+        return new Promise((resolve, reject) => {
+            model.find().sort({
+                'key': -1
+            }).skip(parseInt(req.query.page)).limit(parseInt(req.query.limit)).then(data => {
+                model.countDocuments({}).then(count => {
+                    resolve({
+                        code: 200,
+                        data: data,
+                        count: count
+                    })
+                }).catch(err => {
+                    console.log(err)
+                    reject(buildErrObject(422, err.message))
+                })
+            }).catch(err => {
+                console.log(err)
+                reject(buildErrObject(422, err.message))
+            })
+        })
+    },
+    async deleteGenericFaq(id, model) {
+        return new Promise((resolve, reject) => {
+            model.findByIdAndRemove(id, (err, item) => {
+                itemNotFound(err, item, reject, 'NOT_FOUND')
+                resolve(buildSuccObject('DELETED'))
+            })
+        })
+    }
+
+
+
+
+    // model.updateOne({
+    //     type: body.type
+    // }, {
+    //     $set: {
+    //         heading: body.heading,
+    //         description:body.description
+    //     }
+    // }).then(update => {
+    //     resolve({
+    //         code: 200,
+    //     })
+    // }).catch(e => {
+    //     console.log(e)
+    // })
+
+
+
+    
+
+
+
+    
+
+    // async DeleteItem(id, model, req) {
+    //       return new Promise((resolve, reject) => {
+    //           model.findByIdAndDelete(
+    //                 id,
+    //                 req,
+    //                 {
+    //                   new: true,
+    //                   runValidators: true
+    //           },
+    //           (err, item) => {
+    //               itemNotFound(err, item, reject, 'NOT_FOUND')
+    //               resolve(item)
+    //           }
+    //           )
+    //       })
+    // },
+}
